@@ -104,4 +104,19 @@ describe("issue watcher contracts", () => {
     ).toMatchObject({ inputs: { email: "dev@example.com" }, verification: { status: "connected" } })
     expect(Schema.decodeUnknownSync(Credential.Key)({ type: "key", key: "legacy" }).inputs).toEqual({})
   })
+
+  test("defines bounded preview input and output contracts", () => {
+    const input = Schema.decodeUnknownSync(IssueWatcher.PreviewInput)({
+      integrationID: "jira",
+      connectionID: "icn_connection",
+      criteria: { issueProjects: ["DEV"], watchUpdates: true },
+      routing: { mappings: [], fallback: "inbox", workspace: { type: "current" } },
+      action: { mode: "inbox", promptTemplate: "{{issue.key}}", writeback: { comment: false, commentOnFailure: false } },
+    })
+    expect(String(input.connectionID)).toBe("icn_connection")
+    expect(Schema.decodeUnknownSync(IssueWatcher.Preview)({ matches: [], truncated: false })).toEqual({
+      matches: [],
+      truncated: false,
+    })
+  })
 })

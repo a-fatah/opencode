@@ -8,7 +8,7 @@ import { useLocation, useNavigate, useParams } from "@solidjs/router"
 import { usePlatform } from "./platform"
 import { uuid } from "@/utils/uuid"
 import { SessionTabsRemovedDetail } from "@/components/titlebar-session-events"
-import { sessionHref } from "@/utils/session-route"
+import { serverHref, sessionHref } from "@/utils/session-route"
 import { createTabMemory } from "./tab-memory"
 import { nextTabAfterClose, pushClosedTab, removeClosedTabs, takeClosedTab, type ClosedTab } from "./closed-tabs"
 import { createDraftPromptSession, type PromptModel } from "./prompt-state"
@@ -27,7 +27,25 @@ export type DraftTab = {
   worktree?: string
 }
 
-export type Tab = SessionTab | DraftTab
+export type InboxTab = {
+  type: "inbox"
+  server: ServerConnection.Key
+}
+
+export type WatchersTab = {
+  type: "watchers"
+  server: ServerConnection.Key
+}
+
+export type WatcherTab = {
+  type: "watcher"
+  server: ServerConnection.Key
+  watcherID: string
+}
+
+export type UtilityTab = InboxTab | WatchersTab | WatcherTab
+
+export type Tab = SessionTab | DraftTab | UtilityTab
 
 export type TabInfo = {
   title?: string
@@ -40,8 +58,13 @@ type RecentTab = {
 
 export const draftHref = (draftID: string) => `/new-session?draftId=${encodeURIComponent(draftID)}`
 
-export const tabHref = (tab: Tab) =>
-  tab.type === "draft" ? draftHref(tab.draftID) : sessionHref(tab.server, tab.sessionId)
+export const tabHref = (tab: Tab) => {
+  if (tab.type === "draft") return draftHref(tab.draftID)
+  if (tab.type === "session") return sessionHref(tab.server, tab.sessionId)
+  if (tab.type === "inbox") return serverHref(tab.server, "inbox")
+  if (tab.type === "watchers") return serverHref(tab.server, "watchers")
+  return serverHref(tab.server, `watchers/${encodeURIComponent(tab.watcherID)}`)
+}
 
 export const tabKey = (tab: Tab) => (tab.type === "draft" ? `draft:${tab.draftID}` : `${tab.server}\n${tabHref(tab)}`)
 
@@ -193,6 +216,23 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
         })
         return next
       },
+      addUtilityTab: (tab: UtilityTab) => {
+        const existing = store.find((item) => tabKey(item) === tabKey(tab))
+        if (existing) return existing
+        void startTransition(() => {
+          setStore(
+            produce((tabs) => {
+              if (tabs.some((item) => tabKey(item) === tabKey(tab))) return
+              tabs.push(tab)
+            }),
+          )
+        })
+        return tab
+      },
+      openUtilityTab(tab: UtilityTab) {
+        actions.addUtilityTab(tab)
+        navigateTab(tab)
+      },
       reorder(keys: string[]) {
         setStore(
           produce((tabs) => {
@@ -248,6 +288,23 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
         memory.remove(`draft:${draftID}`)
         removeDraftPersisted(draftID)
       },
+      promoteWatcherTab(server: ServerConnection.Key, watcherID: string) {
+        const current = { type: "watcher" as const, server, watcherID: "new" }
+        const next = { type: "watcher" as const, server, watcherID }
+        void startTransition(() => {
+          setStore(
+            produce((tabs) => {
+              const index = tabs.findIndex((tab) => tabKey(tab) === tabKey(current))
+              if (index !== -1) tabs[index] = next
+              else if (!tabs.some((tab) => tabKey(tab) === tabKey(next))) tabs.push(next)
+            }),
+          )
+          if (recentKey() === tabKey(current)) setRecentKey(tabKey(next))
+          navigateTab(next)
+        })
+        memory.remove(tabKey(current))
+        removeInfo(tabKey(current))
+      },
       removeTab,
       // User-initiated close: records the tab so it can be reopened.
       // Cleanup paths (missing sessions, archive, server removal) go through
@@ -255,7 +312,7 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
       closeTab(index: number) {
         const tab = store[index]
         if (!tab) return
-        if (tab.type === "session") updateClosed((stack) => pushClosedTab(stack, tab, index))
+        if (tab.type !== "draft") updateClosed((stack) => pushClosedTab(stack, tab, index))
         removeTab(index)
       },
       reopenClosedTab() {
@@ -352,6 +409,12 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
       rememberSessionInfo(tab: SessionTab, session: Session) {
         const key = tabKey(tab)
         const next = { title: session.title, directory: session.directory }
+        const current = info[key]
+        if (current?.title === next.title && current.directory === next.directory) return
+        setInfo(key, next)
+      },
+      rememberInfo(tab: Tab, next: TabInfo) {
+        const key = tabKey(tab)
         const current = info[key]
         if (current?.title === next.title && current.directory === next.directory) return
         setInfo(key, next)

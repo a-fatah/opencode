@@ -7,6 +7,8 @@ import type {
   IssueWatchersCreateConnectionOutput,
   IssueWatchersRotateConnectionInput,
   IssueWatchersRotateConnectionOutput,
+  IssueWatchersPreviewInput,
+  IssueWatchersPreviewOutput,
   IssueWatchersGetSettingsOutput,
   IssueWatchersUpdateSettingsInput,
   IssueWatchersUpdateSettingsOutput,
@@ -319,6 +321,24 @@ export function make(options: ClientOptions) {
             body: { key: input["key"], inputs: input["inputs"], label: input["label"] },
             successStatus: 200,
             declaredStatuses: [400, 404, 401, 502, 409],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      preview: (input: IssueWatchersPreviewInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersPreviewOutput>(
+          {
+            method: "POST",
+            path: `/api/issue-watcher/preview`,
+            body: {
+              integrationID: input["integrationID"],
+              connectionID: input["connectionID"],
+              criteria: input["criteria"],
+              routing: input["routing"],
+              action: input["action"],
+            },
+            successStatus: 200,
+            declaredStatuses: [400, 404, 401, 502],
             empty: false,
           },
           requestOptions,

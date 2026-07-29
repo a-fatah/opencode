@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { createRoot, getOwner, onCleanup } from "solid-js"
 import { createTabMemory } from "./tab-memory"
 import { nextTabAfterClose, pushClosedTab, removeClosedTabs, takeClosedTab, type ClosedTab } from "./closed-tabs"
-import type { SessionTab, Tab } from "./tabs"
+import { tabHref, tabKey, type SessionTab, type Tab } from "./tabs"
 import type { ServerConnection } from "./server"
 
 const server = "local\nhttp://localhost:4096" as ServerConnection.Key
@@ -47,6 +47,18 @@ describe("closed tab stack", () => {
     expect(pushClosedTab([], draft, 0)).toEqual([])
   })
 
+  test("records and reopens utility tabs", () => {
+    const inbox = { type: "inbox" as const, server }
+    const watcher = { type: "watcher" as const, server, watcherID: "watcher/1" }
+    const stack = pushClosedTab(pushClosedTab([], inbox, 0), watcher, 1)
+
+    expect(takeClosedTab(stack, [inbox])).toEqual({
+      entry: { tab: watcher, index: 1 },
+      stack: [{ tab: inbox, index: 0 }],
+    })
+    expect(takeClosedTab([{ tab: inbox, index: 0 }], [inbox])).toEqual({ stack: [] })
+  })
+
   test("caps the stack size", () => {
     const stack = Array.from({ length: 30 }, (_, i) => i).reduce<ClosedTab[]>(
       (acc, i) => pushClosedTab(acc, sessionTab(`s${i}`), i),
@@ -54,8 +66,8 @@ describe("closed tab stack", () => {
     )
 
     expect(stack).toHaveLength(25)
-    expect(stack[0]?.tab.sessionId).toBe("s5")
-    expect(stack.at(-1)?.tab.sessionId).toBe("s29")
+    expect(stack[0]?.tab).toEqual(sessionTab("s5"))
+    expect(stack.at(-1)?.tab).toEqual(sessionTab("s29"))
   })
 
   test("pops the most recently closed tab", () => {
@@ -65,7 +77,7 @@ describe("closed tab stack", () => {
     ]
     const result = takeClosedTab(stack, [])
 
-    expect(result.entry?.tab.sessionId).toBe("b")
+    expect(result.entry?.tab).toEqual(sessionTab("b"))
     expect(result.stack).toEqual([{ tab: sessionTab("a"), index: 0 }])
   })
 
@@ -76,7 +88,7 @@ describe("closed tab stack", () => {
     ]
     const result = takeClosedTab(stack, [sessionTab("b")])
 
-    expect(result.entry?.tab.sessionId).toBe("a")
+    expect(result.entry?.tab).toEqual(sessionTab("a"))
     expect(result.stack).toEqual([])
   })
 
@@ -103,5 +115,18 @@ describe("closed tab stack", () => {
     expect(nextTabAfterClose(tabs, 1, false)).toBeUndefined()
     expect(nextTabAfterClose(tabs, 1, true)).toEqual(sessionTab("c"))
     expect(nextTabAfterClose([sessionTab("a")], 0, true)).toBeNull()
+  })
+})
+
+describe("utility tabs", () => {
+  test("builds stable server-scoped hrefs and keys", () => {
+    const inbox = { type: "inbox" as const, server }
+    const watchers = { type: "watchers" as const, server }
+    const watcher = { type: "watcher" as const, server, watcherID: "new rule" }
+
+    expect(tabHref(inbox)).toEndWith("/inbox")
+    expect(tabHref(watchers)).toEndWith("/watchers")
+    expect(tabHref(watcher)).toEndWith("/watchers/new%20rule")
+    expect(new Set([tabKey(inbox), tabKey(watchers), tabKey(watcher)]).size).toBe(3)
   })
 })

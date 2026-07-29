@@ -6,6 +6,10 @@ export function sessionHref(server: ServerConnection.Key, sessionID: string) {
   return `/server/${base64Encode(server)}/session/${sessionID}`
 }
 
+export function serverHref(server: ServerConnection.Key, path: string) {
+  return `/server/${base64Encode(server)}/${path}`
+}
+
 export function legacySessionHref(directory: string, sessionID: string) {
   return `/${base64Encode(directory)}/session/${sessionID}`
 }

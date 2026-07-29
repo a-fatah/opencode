@@ -69,8 +69,11 @@ import { createSessionLineage } from "@/pages/session/session-lineage"
 import { SessionPage, SessionRouteErrorBoundary, TargetSessionRouteContent } from "@/pages/session"
 import { NewHome } from "@/pages/home"
 import { LegacyHome } from "@/pages/home/legacy-home"
+import { InboxPage } from "@/pages/utility"
 
 const NewSession = lazy(() => import("@/pages/new-session"))
+const WatchersPage = lazy(() => import("@/pages/watchers"))
+const WatcherEditorPage = lazy(() => import("@/pages/watchers").then((module) => ({ default: module.WatcherEditorPage })))
 
 const SessionRoute = () => {
   const settings = useSettings()
@@ -131,6 +134,24 @@ function TargetServerRoute(props: ParentProps) {
 const TargetSessionRoute = () => (
   <TargetServerRoute>
     <TargetSessionRouteContent />
+  </TargetServerRoute>
+)
+
+const TargetInboxRoute = () => (
+  <TargetServerRoute>
+    <InboxPage />
+  </TargetServerRoute>
+)
+
+const TargetWatchersRoute = () => (
+  <TargetServerRoute>
+    <WatchersPage />
+  </TargetServerRoute>
+)
+
+const TargetWatcherRoute = () => (
+  <TargetServerRoute>
+    <WatcherEditorPage />
   </TargetServerRoute>
 )
 
@@ -631,6 +652,9 @@ function Routes(props: { serverScoped?: JSX.Element }) {
         <Route path="/" component={NewHome} />
         <Route path="/:dir/session/:id" component={NewLayoutLegacySessionRedirect} />
         <Route path="/server/:serverKey/session/:id" component={TargetSessionRoute} />
+        <Route path="/server/:serverKey/inbox" component={TargetInboxRoute} />
+        <Route path="/server/:serverKey/watchers" component={TargetWatchersRoute} />
+        <Route path="/server/:serverKey/watchers/:watcherID" component={TargetWatcherRoute} />
       </Show>
       <Route path="/new-session" component={DraftRoute} />
     </>

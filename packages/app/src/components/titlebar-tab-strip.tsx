@@ -7,9 +7,9 @@ import { Accessibility, AutoScroller, Feedback, PointerActivationConstraints } f
 import { RestrictToHorizontalAxis } from "@dnd-kit/abstract/modifiers"
 import { RestrictToElement } from "@dnd-kit/dom/modifiers"
 import { arrayMove } from "@dnd-kit/helpers"
-import { tabHref, tabKey, type SessionTab, type Tab } from "@/context/tabs"
+import { tabHref, tabKey, type SessionTab, type Tab, type UtilityTab } from "@/context/tabs"
 import { ServerConnection } from "@/context/server"
-import { DraftTabItem, TabNavItem } from "@/components/titlebar-tab-nav"
+import { DraftTabItem, TabNavItem, UtilityTabItem } from "@/components/titlebar-tab-nav"
 import { useGlobal, type ServerCtx } from "@/context/global"
 import { useLanguage } from "@/context/language"
 import { useCommand } from "@/context/command"
@@ -209,6 +209,49 @@ function DraftTabSlot(props: {
   )
 }
 
+function UtilityTabSlot(props: {
+  tab: UtilityTab
+  id: string
+  index: () => number
+  active: () => boolean
+  title: string
+  onNavigate: (element: HTMLDivElement) => void
+  onClose: () => void
+}) {
+  const sortable = useSortable({
+    get id() {
+      return props.id
+    },
+    get index() {
+      return props.index()
+    },
+  })
+  let ref!: HTMLDivElement
+
+  return (
+    <div
+      ref={sortable.ref}
+      data-titlebar-tab-slot
+      data-tab-key={props.id}
+      data-active={props.active()}
+      class="relative flex w-56 min-w-7 max-w-56 flex-shrink"
+    >
+      <UtilityTabItem
+        ref={(el) => {
+          ref = el
+        }}
+        href={tabHref(props.tab)}
+        title={props.title}
+        icon={props.tab.type === "inbox" ? "archive" : "review"}
+        onNavigate={() => props.onNavigate(ref)}
+        onClose={props.onClose}
+        active={props.active()}
+        dragging={sortable.isDragSource()}
+      />
+    </div>
+  )
+}
+
 export function TitlebarTabStrip(props: {
   tabs: Tab[]
   currentTab: () => Tab | undefined
@@ -221,11 +264,12 @@ export function TitlebarTabStrip(props: {
   const global = useGlobal()
   const language = useLanguage()
   const command = useCommand()
+  const tabs = useTabs()
   let scrollRef!: HTMLDivElement
   let listRef!: HTMLDivElement
   let resizeFrame: number | undefined
   const [visibility, setVisibility] = createStore<Record<string, boolean>>({})
-  const visibleTabs = createMemo(() => props.tabs.filter((tab) => tab.type === "draft" || visibility[tabKey(tab)]))
+  const visibleTabs = createMemo(() => props.tabs.filter((tab) => tab.type !== "session" || visibility[tabKey(tab)]))
   const visibleTabIds = () => visibleTabs().map(tabKey)
 
   command.register("titlebar-tab-cycle", () => [
@@ -355,6 +399,29 @@ export function TitlebarTabStrip(props: {
                       forceTruncate={props.forceTruncate}
                       serverCtx={serverCtx}
                       onVisibleChange={(visible) => setVisibility(id, visible)}
+                      onNavigate={(element) => {
+                        ref = element
+                        props.onNavigate(tab, element)
+                      }}
+                      onClose={() => props.onClose(tab)}
+                    />
+                  )
+                }
+
+                if (tab.type !== "draft") {
+                  return (
+                    <UtilityTabSlot
+                      tab={tab}
+                      id={id}
+                      index={visibleIndex}
+                      active={() => props.currentTab() === tab}
+                      title={
+                        tab.type === "inbox"
+                          ? language.t("sidebar.inbox")
+                          : tab.type === "watchers"
+                            ? language.t("sidebar.watchers")
+                            : tabs.info[id]?.title ?? (tab.watcherID === "new" ? language.t("watcher.new") : language.t("watcher.title"))
+                      }
                       onNavigate={(element) => {
                         ref = element
                         props.onNavigate(tab, element)

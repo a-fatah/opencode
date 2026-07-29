@@ -63,6 +63,7 @@ export const IssueWatcherHandler = HttpApiBuilder.group(Api, "server.issueWatche
           ),
         ),
       )
+      .handle("issueWatcher.preview", (ctx) => service.preview(ctx.payload).pipe(Effect.mapError(sourceError)))
       .handle("issueWatcher.getSettings", () => service.settings.get())
       .handle("issueWatcher.updateSettings", (ctx) => service.settings.update(ctx.payload))
       .handle("issueWatcher.list", () => service.list())

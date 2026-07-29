@@ -12,6 +12,9 @@ import { IssueWatcherOwner } from "./issue-watcher/owner"
 import { IssueWatcherTable } from "./issue-watcher/sql"
 import { Credential } from "./credential"
 import { Integration } from "@opencode-ai/schema/integration"
+import { Issue } from "@opencode-ai/schema/issue"
+import { Repository } from "./repository"
+import { ProjectRoutingCatalog } from "./project/routing-catalog"
 
 export const ID = IssueWatcher.ID
 export type ID = IssueWatcher.ID
@@ -22,6 +25,68 @@ export type CreateInput = IssueWatcher.CreateInput
 export const UpdateInput = IssueWatcher.UpdateInput
 export type UpdateInput = IssueWatcher.UpdateInput
 export const Event = IssueWatcher.Event
+export const PreviewLimit = 100
+export const PreviewPageLimit = 20
+
+export function route(
+  issue: Issue.Info,
+  routing: IssueWatcher.Routing,
+  projects: ReadonlyArray<IssueWatcher.ProjectRoutingSnapshot>,
+): IssueWatcher.Route {
+  if (routing.repoField && issue.repoField) {
+    const repository = Repository.parse(issue.repoField)
+    if (repository && Repository.isRemote(repository)) {
+      const project = projects.find((item) =>
+        item.remotes.some((remote) =>
+          remote.host === repository.host &&
+          (remote.host === "github.com" ? remote.path.toLowerCase() === repository.path.toLowerCase() : remote.path === repository.path),
+        ),
+      )
+      if (project) return { projectID: project.projectID, reason: `Repository field matched ${repository.label}` }
+    }
+  }
+  const mapping = routing.mappings.find((item) => {
+    if (item.key.type === "label") return issue.labels.includes(item.key.value)
+    if (item.key.type === "component") return issue.component === item.key.value
+    return issue.issueProject === item.key.value
+  })
+  if (mapping) return { projectID: mapping.projectID, reason: `${mapping.key.type} matched ${mapping.key.value}` }
+  const suggestion = projects.length === 1 ? projects[0]?.projectID : undefined
+  return { unrouted: true, reason: "No repository or explicit mapping matched", ...(suggestion ? { suggestion } : {}) }
+}
+
+export function renderPrompt(
+  issue: Issue.Info,
+  project: IssueWatcher.ProjectRoutingSnapshot | undefined,
+  template: string,
+) {
+  const values = {
+    "issue.id": issue.id,
+    "issue.key": issue.key,
+    "issue.title": issue.title,
+    "issue.description": issue.description,
+    "issue.url": issue.url,
+    "issue.status": issue.status,
+    "issue.assignee": issue.assignee?.name ?? "",
+    "issue.labels": issue.labels.join(", "),
+    "issue.issueProject": issue.issueProject,
+    "issue.component": issue.component ?? "",
+    "issue.acceptanceCriteria": issue.acceptanceCriteria ?? "",
+    "issue.repoField": issue.repoField ?? "",
+    "project.id": project?.projectID ?? "",
+    "project.name": project?.name ?? "",
+    "project.directory": project?.directories[0] ?? "",
+  }
+  return template.replace(/\{\{\s*([a-zA-Z.]+)\s*\}\}/g, (token, key: keyof typeof values) => values[key] ?? token)
+}
+
+export function renderWriteback(issue: Issue.Info, action: IssueWatcher.Action): IssueWatcher.WritebackPlan {
+  return {
+    ...(action.writeback.comment ? { comment: `OpenCode started work on ${issue.key}: ${issue.title}` } : {}),
+    ...(action.writeback.transitionOnStart ? { transitionOnStart: action.writeback.transitionOnStart } : {}),
+    ...(action.writeback.commentOnFailure ? { commentOnFailure: `OpenCode could not complete work on ${issue.key}.` } : {}),
+  }
+}
 
 export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("IssueWatcher.NotFoundError", {
   id: ID,
@@ -91,6 +156,9 @@ export interface Interface {
     readonly get: () => Effect.Effect<IssueWatcher.Settings>
     readonly update: (input: IssueWatcher.SettingsInput) => Effect.Effect<IssueWatcher.Settings>
   }
+  readonly preview: (
+    input: IssueWatcher.PreviewInput,
+  ) => Effect.Effect<IssueWatcher.Preview, SourceNotFoundError | ConnectionNotFoundError | IssueProvider.Error>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/IssueWatcher") {}
@@ -104,6 +172,7 @@ const layer = Layer.effect(
     const providers = yield* IssueProvider.Service
     const credentials = yield* Credential.Service
     const config = yield* GlobalConfig.Service
+    const projectCatalog = yield* ProjectRoutingCatalog.Service
     const decode = Schema.decodeUnknownSync(Info)
 
     const stored = (row: typeof IssueWatcherTable.$inferSelect) => decode({
@@ -146,6 +215,18 @@ const layer = Layer.effect(
       return credential
     })
 
+    const ownedConnection = Effect.fnUntraced(function* (
+      integrationID: Integration.ID,
+      connectionID: Credential.ConnectionID,
+    ) {
+      yield* provider(integrationID)
+      const credential = yield* connection(connectionID)
+      if (credential.integrationID !== integrationID || credential.value.type !== "key") {
+        return yield* new ConnectionNotFoundError({ connectionID })
+      }
+      return credential.value
+    })
+
     const projectSource = Effect.fnUntraced(function* (adapter: IssueProvider.Adapter) {
       const saved = (yield* credentials.list(adapter.integrationID)).toReversed().find(
         (credential) => credential.connectionID && credential.value.type === "key",
@@ -180,6 +261,36 @@ const layer = Layer.effect(
           : {}),
         owner: ownerStatus(),
       })
+    })
+
+    const previewIssues = Effect.fnUntraced(function* (
+      adapter: IssueProvider.Adapter,
+      credential: Credential.Key,
+      criteria: IssueWatcher.Criteria,
+      page?: string,
+      remaining = PreviewLimit + 1,
+      pages = 0,
+      seen: ReadonlySet<string> = new Set(),
+    ): Effect.fn.Return<ReadonlyArray<Issue.Info>, IssueProvider.Error> {
+      if (pages >= PreviewPageLimit) {
+        return yield* new IssueProvider.PaginationError({ detail: `Preview exceeded ${PreviewPageLimit} provider pages` })
+      }
+      if (page && seen.has(page)) {
+        return yield* new IssueProvider.PaginationError({ detail: "Preview provider repeated a page token" })
+      }
+      const result = yield* adapter.search({ credential, criteria, ...(page ? { page } : {}) })
+      if (result.issues.length >= remaining) return result.issues.slice(0, remaining)
+      if (!result.nextPage) return result.issues
+      const next = yield* previewIssues(
+        adapter,
+        credential,
+        criteria,
+        result.nextPage,
+        remaining - result.issues.length,
+        pages + 1,
+        new Set(page ? [...seen, page] : seen),
+      )
+      return [...result.issues, ...next]
     })
 
     const verifyCredential = Effect.fnUntraced(function* (adapter: IssueProvider.Adapter, value: Credential.Key) {
@@ -371,6 +482,27 @@ const layer = Layer.effect(
           })
         }),
       },
+      preview: Effect.fn("IssueWatcher.preview")(function* (input) {
+        const adapter = yield* provider(input.integrationID)
+        const credential = yield* ownedConnection(input.integrationID, input.connectionID)
+        const issues = yield* previewIssues(adapter, credential, input.criteria)
+        const projects = yield* projectCatalog.list()
+        return {
+          matches: issues.slice(0, PreviewLimit).map((issue) => {
+            const routed = route(issue, input.routing, projects)
+            const project = "projectID" in routed
+              ? projects.find((item) => item.projectID === routed.projectID)
+              : undefined
+            return {
+              issue,
+              route: routed,
+              prompt: renderPrompt(issue, project, input.action.promptTemplate),
+              writeback: renderWriteback(issue, input.action),
+            }
+          }),
+          truncated: issues.length > PreviewLimit,
+        }
+      }),
     })
   }),
 )
@@ -378,5 +510,5 @@ const layer = Layer.effect(
 export const node = makeGlobalNode({
   service: Service,
   layer,
-  deps: [Database.node, EventV2.node, GlobalConfig.node, Credential.node, IssueProvider.node, IssueWatcherOwner.node],
+  deps: [Database.node, EventV2.node, GlobalConfig.node, Credential.node, IssueProvider.node, IssueWatcherOwner.node, ProjectRoutingCatalog.node],
 })

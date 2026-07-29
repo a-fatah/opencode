@@ -7,6 +7,7 @@ import { useLanguage } from "@/context/language"
 import { useNotification } from "@/context/notification"
 import { usePlatform } from "@/context/platform"
 import { ServerConnection } from "@/context/server"
+import { useTabs } from "@/context/tabs"
 import { closeHomeProject, errorMessage, homeProjectDirectories } from "@/pages/layout/helpers"
 import { Persist, persisted } from "@/utils/persist"
 import { showToast } from "@/utils/toast"
@@ -21,6 +22,7 @@ export function createHomeProjectsController(home: HomeController) {
   const dialog = useDialog()
   const language = useLanguage()
   const notification = useNotification()
+  const tabs = useTabs()
   const openSettings = useSettingsCommand(() => home.selection.value().server)
   const serverManagement = useServerManagementController({ navigateOnAdd: false })
   const [_state, setState, _, ready] = persisted(
@@ -119,6 +121,8 @@ export function createHomeProjectsController(home: HomeController) {
       },
     },
     utility: {
+      inbox: () => tabs.openUtilityTab({ type: "inbox", server: home.selection.value().server }),
+      watchers: () => tabs.openUtilityTab({ type: "watchers", server: home.selection.value().server }),
       settings: openSettings,
       help: () => platform.openLink("https://opencode.ai/desktop-feedback"),
     },

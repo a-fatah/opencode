@@ -117,7 +117,7 @@ window.ISSUE_WATCHER_PLAN = {
       id: "wave-3",
       number: 3,
       name: "Watcher Authoring",
-      status: "planned",
+      status: "complete",
       dependsOn: ["wave-2"],
       specSlices: ["Slice 4"],
       objective: "Let users define a watcher and preview its exact routing, prompt, and write-back plan.",
@@ -125,7 +125,7 @@ window.ISSUE_WATCHER_PLAN = {
       lanes: [
         {
           name: "Pure pipeline",
-          status: "planned",
+          status: "complete",
           work: [
             "Route, prompt rendering, and write-back planning functions",
             "Project routing catalog with normalized remotes",
@@ -134,7 +134,7 @@ window.ISSUE_WATCHER_PLAN = {
         },
         {
           name: "Tab infrastructure",
-          status: "planned",
+          status: "complete",
           work: [
             "Inbox, Watchers, and Watcher utility tab types",
             "Route adoption, title metadata, persistence, close, and reopen",
@@ -143,7 +143,7 @@ window.ISSUE_WATCHER_PLAN = {
         },
         {
           name: "Authoring UI",
-          status: "planned",
+          status: "complete",
           work: [
             "Watchers list without polling-only controls",
             "Criteria, Routing, and Action editor sections",

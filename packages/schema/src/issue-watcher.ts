@@ -6,6 +6,7 @@ import { ascending } from "./identifier"
 import { Integration } from "./integration"
 import { Credential } from "./credential"
 import { IssueMatch } from "./issue-match"
+import { Issue } from "./issue"
 import { Project } from "./project"
 import { DateTimeUtcFromMillis, NonNegativeInt, optional, statics } from "./schema"
 import { SessionID } from "./session-id"
@@ -89,6 +90,57 @@ export const Action = Schema.Struct({
   promptTemplate: Schema.String,
   writeback: Writeback,
 }).annotate({ identifier: "IssueWatcher.Action" })
+
+export interface ProjectRemote extends Schema.Schema.Type<typeof ProjectRemote> {}
+export const ProjectRemote = Schema.Struct({
+  host: Schema.String,
+  path: Schema.String,
+  label: Schema.String,
+}).annotate({ identifier: "IssueWatcher.ProjectRemote" })
+
+export interface ProjectRoutingSnapshot extends Schema.Schema.Type<typeof ProjectRoutingSnapshot> {}
+export const ProjectRoutingSnapshot = Schema.Struct({
+  projectID: Project.ID,
+  name: Schema.String,
+  directories: Schema.Array(Schema.String),
+  remotes: Schema.Array(ProjectRemote),
+}).annotate({ identifier: "IssueWatcher.ProjectRoutingSnapshot" })
+
+export const Route = Schema.Union([
+  Schema.Struct({ projectID: Project.ID, reason: Schema.String }),
+  Schema.Struct({ unrouted: Schema.Literal(true), reason: Schema.String, suggestion: optional(Project.ID) }),
+]).annotate({ identifier: "IssueWatcher.Route" })
+export type Route = typeof Route.Type
+
+export interface WritebackPlan extends Schema.Schema.Type<typeof WritebackPlan> {}
+export const WritebackPlan = Schema.Struct({
+  comment: optional(Schema.String),
+  transitionOnStart: optional(Schema.String),
+  commentOnFailure: optional(Schema.String),
+}).annotate({ identifier: "IssueWatcher.WritebackPlan" })
+
+export interface PreviewInput extends Schema.Schema.Type<typeof PreviewInput> {}
+export const PreviewInput = Schema.Struct({
+  integrationID: Integration.ID,
+  connectionID: ConnectionID,
+  criteria: Criteria,
+  routing: Routing,
+  action: Action,
+}).annotate({ identifier: "IssueWatcher.PreviewInput" })
+
+export interface PreviewMatch extends Schema.Schema.Type<typeof PreviewMatch> {}
+export const PreviewMatch = Schema.Struct({
+  issue: Issue.Info,
+  route: Route,
+  prompt: Schema.String,
+  writeback: WritebackPlan,
+}).annotate({ identifier: "IssueWatcher.PreviewMatch" })
+
+export interface Preview extends Schema.Schema.Type<typeof Preview> {}
+export const Preview = Schema.Struct({
+  matches: Schema.Array(PreviewMatch),
+  truncated: Schema.Boolean,
+}).annotate({ identifier: "IssueWatcher.Preview" })
 
 export interface Info extends Schema.Schema.Type<typeof Info> {}
 export const Info = Schema.Struct({

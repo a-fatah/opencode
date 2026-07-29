@@ -124,3 +124,33 @@ export class IssueWatcherOwnerConflict extends Schema.TaggedErrorClass<IssueWatc
   { message: Schema.String },
   { httpApiStatus: 409 },
 ) {}
+
+export class IssueIntegrationNotFoundError extends Schema.TaggedErrorClass<IssueIntegrationNotFoundError>()(
+  "IssueIntegrationNotFoundError",
+  { integrationID: Schema.String, message: Schema.String },
+  { httpApiStatus: 404 },
+) {}
+
+export class IssueIntegrationConnectionNotFoundError extends Schema.TaggedErrorClass<IssueIntegrationConnectionNotFoundError>()(
+  "IssueIntegrationConnectionNotFoundError",
+  { connectionID: Schema.String, message: Schema.String },
+  { httpApiStatus: 404 },
+) {}
+
+export class IssueIntegrationTenantConflict extends Schema.TaggedErrorClass<IssueIntegrationTenantConflict>()(
+  "IssueIntegrationTenantConflict",
+  { connectionID: Schema.String, message: Schema.String },
+  { httpApiStatus: 409 },
+) {}
+
+export class IssueIntegrationAuthenticationError extends Schema.TaggedErrorClass<IssueIntegrationAuthenticationError>()(
+  "IssueIntegrationAuthenticationError",
+  { message: Schema.String },
+  { httpApiStatus: 401 },
+) {}
+
+export class IssueIntegrationProviderError extends Schema.TaggedErrorClass<IssueIntegrationProviderError>()(
+  "IssueIntegrationProviderError",
+  { message: Schema.String },
+  { httpApiStatus: 502 },
+) {}

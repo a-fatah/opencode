@@ -22,16 +22,30 @@ describe("IssueProvider", () => {
       const service = yield* IssueProvider.Service
       const integrationID = Integration.ID.make("github")
 
-      expect(yield* service.list()).toEqual([])
+      expect((yield* service.list()).map((item) => item.integrationID)).toEqual([Integration.ID.make("jira")])
       expect(yield* service.get(integrationID)).toBeUndefined()
 
       const scope = yield* Scope.make()
-      yield* service.register({ integrationID }).pipe(Scope.provide(scope))
-      expect(yield* service.list()).toEqual([{ integrationID }])
-      expect(yield* service.get(integrationID)).toEqual({ integrationID })
+      const adapter: IssueProvider.Adapter = {
+        integrationID,
+        name: "GitHub",
+        method: { type: "key" },
+        tenantIdentity: () => Effect.succeed("github.com"),
+        verify: () => Effect.succeed({ ok: true, detail: "connected" }),
+        search: () => Effect.succeed({ issues: [], cursor: "cursor" }),
+        get: () => Effect.die("unused"),
+        comment: () => new IssueProvider.NotImplementedError({ operation: "comment" }),
+        transition: () => new IssueProvider.NotImplementedError({ operation: "transition" }),
+      }
+      yield* service.register(adapter).pipe(Scope.provide(scope))
+      expect((yield* service.list()).map((item) => item.integrationID)).toEqual([
+        Integration.ID.make("jira"),
+        integrationID,
+      ])
+      expect(yield* service.get(integrationID)).toBe(adapter)
 
       yield* Scope.close(scope, Exit.void)
-      expect(yield* service.list()).toEqual([])
+      expect((yield* service.list()).map((item) => item.integrationID)).toEqual([Integration.ID.make("jira")])
       expect(yield* service.get(integrationID)).toBeUndefined()
     }),
   )

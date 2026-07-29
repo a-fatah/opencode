@@ -30,7 +30,7 @@ function layer(owner = activeOwner) {
 
 const input = {
   integrationID: Integration.ID.make("github"),
-  connectionID: IssueWatcherSchema.ConnectionID.make("connection"),
+  connectionID: IssueWatcherSchema.ConnectionID.make("icn_connection"),
   name: "Incoming bugs",
   criteria: {
     issueProjects: ["opencode"],

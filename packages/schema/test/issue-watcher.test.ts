@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Schema } from "effect"
-import { Issue, IssueMatch, IssueWatcher, SessionProvenance } from "../src"
+import { Credential, Integration, Issue, IssueMatch, IssueWatcher, SessionProvenance } from "../src"
 
 describe("issue watcher contracts", () => {
   test("generated IDs validate their exact prefixes", () => {
@@ -85,5 +85,23 @@ describe("issue watcher contracts", () => {
     ])
     expect(IssueWatcher.Event.DurableDefinitions).toEqual([IssueWatcher.Event.SessionMaterialized])
     expect(IssueWatcher.Event.SessionMaterialized.durable).toEqual({ aggregate: "materializationID", version: 1 })
+  })
+
+  test("keeps key prompts and verification fields precise", () => {
+    expect(
+      Schema.decodeUnknownSync(Integration.KeyMethod)({
+        type: "key",
+        prompts: [{ type: "text", key: "site", message: "Site URL" }],
+      }).prompts,
+    ).toHaveLength(1)
+    expect(
+      Schema.decodeUnknownSync(Credential.Key)({
+        type: "key",
+        key: "secret",
+        inputs: { site: "https://example.atlassian.net", email: "dev@example.com" },
+        verification: { status: "connected", detail: "Connected", checkedAt: 1 },
+      }),
+    ).toMatchObject({ inputs: { email: "dev@example.com" }, verification: { status: "connected" } })
+    expect(Schema.decodeUnknownSync(Credential.Key)({ type: "key", key: "legacy" }).inputs).toEqual({})
   })
 })

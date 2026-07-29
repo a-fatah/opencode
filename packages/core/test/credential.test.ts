@@ -33,4 +33,46 @@ describe("Credential", () => {
       expect(yield* credentials.list(integrationID)).toEqual([])
     }),
   )
+
+  it.effect("legacy key replacement preserves stable issue connections", () =>
+    Effect.gen(function* () {
+      const credentials = yield* Credential.Service
+      const integrationID = Integration.ID.make("jira")
+      const stable = yield* credentials.createConnection({
+        integrationID,
+        connectionID: Credential.ConnectionID.create(),
+        tenantIdentity: "https://example.atlassian.net",
+        value: Credential.Key.make({ type: "key", key: "watcher" }),
+      })
+      const legacy = yield* credentials.create({
+        integrationID,
+        value: Credential.Key.make({ type: "key", key: "legacy" }),
+      })
+
+      expect(yield* credentials.list(integrationID)).toEqual([stable, legacy])
+    }),
+  )
+
+  it.effect("rotates a stable connection without changing its tenant", () =>
+    Effect.gen(function* () {
+      const credentials = yield* Credential.Service
+      const integrationID = Integration.ID.make("jira")
+      const connectionID = Credential.ConnectionID.create()
+      const created = yield* credentials.createConnection({
+        integrationID,
+        connectionID,
+        tenantIdentity: "https://example.atlassian.net",
+        label: "Jira",
+        value: Credential.Key.make({ type: "key", key: "first", inputs: { email: "one@example.com" } }),
+      })
+      const rotated = yield* credentials.rotateConnection(connectionID, {
+        value: Credential.Key.make({ type: "key", key: "second", inputs: { email: "two@example.com" } }),
+      })
+
+      expect(rotated.id).toBe(created.id)
+      expect(rotated.connectionID).toBe(connectionID)
+      expect(rotated.tenantIdentity).toBe("https://example.atlassian.net")
+      expect(rotated.value).toMatchObject({ type: "key", key: "second", inputs: { email: "two@example.com" } })
+    }),
+  )
 })

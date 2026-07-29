@@ -70,7 +70,7 @@ window.ISSUE_WATCHER_PLAN = {
       id: "wave-2",
       number: 2,
       name: "Source Connections",
-      status: "planned",
+      status: "complete",
       dependsOn: ["wave-1"],
       specSlices: ["Slice 2", "Slice 3"],
       objective: "Connect and verify a real Jira tenant through a global, location-free provider boundary.",
@@ -78,7 +78,7 @@ window.ISSUE_WATCHER_PLAN = {
       lanes: [
         {
           name: "Provider backend",
-          status: "planned",
+          status: "complete",
           work: [
             "Global provider registry and Jira adapter",
             "Structured key inputs, canonical tenant identity, create and same-tenant rotation",
@@ -87,7 +87,7 @@ window.ISSUE_WATCHER_PLAN = {
         },
         {
           name: "Source API",
-          status: "planned",
+          status: "complete",
           work: [
             "Location-free verify, connection create, and connection rotate endpoints",
             "Issue integration summaries and watcher settings endpoints",
@@ -96,7 +96,7 @@ window.ISSUE_WATCHER_PLAN = {
         },
         {
           name: "Settings UI",
-          status: "planned",
+          status: "complete",
           work: [
             "Integrations section in the v2 settings dialog",
             "Connect Source dialog driven by KeyMethod prompts",

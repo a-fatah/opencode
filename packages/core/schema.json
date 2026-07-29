@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "3ca767b1-00bf-47af-8ed5-b7f43ef48115",
+  "id": "dc377234-4abd-459a-b51f-cea195ab0877",
   "prevIds": [
-    "f14a9b18-8207-487e-a3d3-227e629ba9ad"
+    "9d8accb0-74dd-4355-bd1f-b76b8e364455"
   ],
   "ddl": [
     {
@@ -429,6 +429,26 @@
       "default": null,
       "generated": null,
       "name": "integration_id",
+      "entityType": "columns",
+      "table": "credential"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "connection_id",
+      "entityType": "columns",
+      "table": "credential"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "tenant_identity",
       "entityType": "columns",
       "table": "credential"
     },
@@ -3292,6 +3312,20 @@
       "name": "session_share_pk",
       "table": "session_share",
       "entityType": "pks"
+    },
+    {
+      "columns": [
+        {
+          "value": "connection_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "credential_connection_uidx",
+      "entityType": "indexes",
+      "table": "credential"
     },
     {
       "columns": [

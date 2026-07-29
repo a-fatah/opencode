@@ -19,20 +19,81 @@ const Endpoint0_0 = (raw: RawClient["server.health"]) => () =>
 const adaptGroup0 = (raw: RawClient["server.health"]) => ({ get: Endpoint0_0(raw) })
 
 const Endpoint1_0 = (raw: RawClient["server.issueWatcher"]) => () =>
-  raw["issueWatcher.list"]({}).pipe(Effect.mapError(mapClientError))
+  raw["issueWatcher.sources"]({}).pipe(Effect.mapError(mapClientError))
 
-type Endpoint1_1Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.create"]>[0]
+type Endpoint1_1Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.verifySource"]>[0]
 type Endpoint1_1Input = {
-  readonly integrationID: Endpoint1_1Request["payload"]["integrationID"]
-  readonly connectionID: Endpoint1_1Request["payload"]["connectionID"]
-  readonly name: Endpoint1_1Request["payload"]["name"]
-  readonly enabled?: Endpoint1_1Request["payload"]["enabled"]
-  readonly projectID?: Endpoint1_1Request["payload"]["projectID"]
-  readonly criteria: Endpoint1_1Request["payload"]["criteria"]
-  readonly routing: Endpoint1_1Request["payload"]["routing"]
-  readonly action: Endpoint1_1Request["payload"]["action"]
+  readonly integrationID: Endpoint1_1Request["params"]["integrationID"]
+  readonly key?: Endpoint1_1Request["payload"]["key"]
+  readonly inputs: Endpoint1_1Request["payload"]["inputs"]
+  readonly useSavedConnection?: Endpoint1_1Request["payload"]["useSavedConnection"]
 }
 const Endpoint1_1 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_1Input) =>
+  raw["issueWatcher.verifySource"]({
+    params: { integrationID: input["integrationID"] },
+    payload: { key: input["key"], inputs: input["inputs"], useSavedConnection: input["useSavedConnection"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint1_2Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.createConnection"]>[0]
+type Endpoint1_2Input = {
+  readonly integrationID: Endpoint1_2Request["params"]["integrationID"]
+  readonly key: Endpoint1_2Request["payload"]["key"]
+  readonly inputs: Endpoint1_2Request["payload"]["inputs"]
+  readonly label?: Endpoint1_2Request["payload"]["label"]
+}
+const Endpoint1_2 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_2Input) =>
+  raw["issueWatcher.createConnection"]({
+    params: { integrationID: input["integrationID"] },
+    payload: { key: input["key"], inputs: input["inputs"], label: input["label"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint1_3Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.rotateConnection"]>[0]
+type Endpoint1_3Input = {
+  readonly integrationID: Endpoint1_3Request["params"]["integrationID"]
+  readonly connectionID: Endpoint1_3Request["params"]["connectionID"]
+  readonly key?: Endpoint1_3Request["payload"]["key"]
+  readonly inputs: Endpoint1_3Request["payload"]["inputs"]
+  readonly label?: Endpoint1_3Request["payload"]["label"]
+}
+const Endpoint1_3 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_3Input) =>
+  raw["issueWatcher.rotateConnection"]({
+    params: { integrationID: input["integrationID"], connectionID: input["connectionID"] },
+    payload: { key: input["key"], inputs: input["inputs"], label: input["label"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+const Endpoint1_4 = (raw: RawClient["server.issueWatcher"]) => () =>
+  raw["issueWatcher.getSettings"]({}).pipe(Effect.mapError(mapClientError))
+
+type Endpoint1_5Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.updateSettings"]>[0]
+type Endpoint1_5Input = {
+  readonly pollInterval: Endpoint1_5Request["payload"]["pollInterval"]
+  readonly concurrentRuns: Endpoint1_5Request["payload"]["concurrentRuns"]
+  readonly retryFailedRuns: Endpoint1_5Request["payload"]["retryFailedRuns"]
+}
+const Endpoint1_5 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_5Input) =>
+  raw["issueWatcher.updateSettings"]({
+    payload: {
+      pollInterval: input["pollInterval"],
+      concurrentRuns: input["concurrentRuns"],
+      retryFailedRuns: input["retryFailedRuns"],
+    },
+  }).pipe(Effect.mapError(mapClientError))
+
+const Endpoint1_6 = (raw: RawClient["server.issueWatcher"]) => () =>
+  raw["issueWatcher.list"]({}).pipe(Effect.mapError(mapClientError))
+
+type Endpoint1_7Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.create"]>[0]
+type Endpoint1_7Input = {
+  readonly integrationID: Endpoint1_7Request["payload"]["integrationID"]
+  readonly connectionID: Endpoint1_7Request["payload"]["connectionID"]
+  readonly name: Endpoint1_7Request["payload"]["name"]
+  readonly enabled?: Endpoint1_7Request["payload"]["enabled"]
+  readonly projectID?: Endpoint1_7Request["payload"]["projectID"]
+  readonly criteria: Endpoint1_7Request["payload"]["criteria"]
+  readonly routing: Endpoint1_7Request["payload"]["routing"]
+  readonly action: Endpoint1_7Request["payload"]["action"]
+}
+const Endpoint1_7 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_7Input) =>
   raw["issueWatcher.create"]({
     payload: {
       integrationID: input["integrationID"],
@@ -46,23 +107,23 @@ const Endpoint1_1 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1
     },
   }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint1_2Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.get"]>[0]
-type Endpoint1_2Input = { readonly watcherID: Endpoint1_2Request["params"]["watcherID"] }
-const Endpoint1_2 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_2Input) =>
+type Endpoint1_8Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.get"]>[0]
+type Endpoint1_8Input = { readonly watcherID: Endpoint1_8Request["params"]["watcherID"] }
+const Endpoint1_8 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_8Input) =>
   raw["issueWatcher.get"]({ params: { watcherID: input["watcherID"] } }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint1_3Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.update"]>[0]
-type Endpoint1_3Input = {
-  readonly watcherID: Endpoint1_3Request["params"]["watcherID"]
-  readonly name?: Endpoint1_3Request["payload"]["name"]
-  readonly projectID?: Endpoint1_3Request["payload"]["projectID"]
-  readonly criteria?: Endpoint1_3Request["payload"]["criteria"]
-  readonly routing?: Endpoint1_3Request["payload"]["routing"]
-  readonly action?: Endpoint1_3Request["payload"]["action"]
-  readonly integrationID?: Endpoint1_3Request["payload"]["integrationID"]
-  readonly connectionID?: Endpoint1_3Request["payload"]["connectionID"]
+type Endpoint1_9Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.update"]>[0]
+type Endpoint1_9Input = {
+  readonly watcherID: Endpoint1_9Request["params"]["watcherID"]
+  readonly name?: Endpoint1_9Request["payload"]["name"]
+  readonly projectID?: Endpoint1_9Request["payload"]["projectID"]
+  readonly criteria?: Endpoint1_9Request["payload"]["criteria"]
+  readonly routing?: Endpoint1_9Request["payload"]["routing"]
+  readonly action?: Endpoint1_9Request["payload"]["action"]
+  readonly integrationID?: Endpoint1_9Request["payload"]["integrationID"]
+  readonly connectionID?: Endpoint1_9Request["payload"]["connectionID"]
 }
-const Endpoint1_3 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_3Input) =>
+const Endpoint1_9 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_9Input) =>
   raw["issueWatcher.update"]({
     params: { watcherID: input["watcherID"] },
     payload: {
@@ -76,29 +137,35 @@ const Endpoint1_3 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1
     },
   }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint1_4Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.archive"]>[0]
-type Endpoint1_4Input = { readonly watcherID: Endpoint1_4Request["params"]["watcherID"] }
-const Endpoint1_4 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_4Input) =>
+type Endpoint1_10Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.archive"]>[0]
+type Endpoint1_10Input = { readonly watcherID: Endpoint1_10Request["params"]["watcherID"] }
+const Endpoint1_10 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_10Input) =>
   raw["issueWatcher.archive"]({ params: { watcherID: input["watcherID"] } }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint1_5Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.enable"]>[0]
-type Endpoint1_5Input = {
-  readonly watcherID: Endpoint1_5Request["params"]["watcherID"]
-  readonly enabled: Endpoint1_5Request["payload"]["enabled"]
+type Endpoint1_11Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.enable"]>[0]
+type Endpoint1_11Input = {
+  readonly watcherID: Endpoint1_11Request["params"]["watcherID"]
+  readonly enabled: Endpoint1_11Request["payload"]["enabled"]
 }
-const Endpoint1_5 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_5Input) =>
+const Endpoint1_11 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_11Input) =>
   raw["issueWatcher.enable"]({
     params: { watcherID: input["watcherID"] },
     payload: { enabled: input["enabled"] },
   }).pipe(Effect.mapError(mapClientError))
 
 const adaptGroup1 = (raw: RawClient["server.issueWatcher"]) => ({
-  list: Endpoint1_0(raw),
-  create: Endpoint1_1(raw),
-  get: Endpoint1_2(raw),
-  update: Endpoint1_3(raw),
-  archive: Endpoint1_4(raw),
-  enable: Endpoint1_5(raw),
+  sources: Endpoint1_0(raw),
+  verifySource: Endpoint1_1(raw),
+  createConnection: Endpoint1_2(raw),
+  rotateConnection: Endpoint1_3(raw),
+  getSettings: Endpoint1_4(raw),
+  updateSettings: Endpoint1_5(raw),
+  list: Endpoint1_6(raw),
+  create: Endpoint1_7(raw),
+  get: Endpoint1_8(raw),
+  update: Endpoint1_9(raw),
+  archive: Endpoint1_10(raw),
+  enable: Endpoint1_11(raw),
 })
 
 type Endpoint2_0Request = Parameters<RawClient["server.location"]["location.get"]>[0]

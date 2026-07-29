@@ -7,6 +7,7 @@ import { Connection } from "./connection"
 import { ascending } from "./identifier"
 import { statics } from "./schema"
 import { IntegrationID, IntegrationMethodID } from "./integration-id"
+import { IntegrationInputs } from "./integration-inputs"
 
 export const ID = IntegrationID
 export type ID = typeof ID.Type
@@ -60,6 +61,7 @@ export interface KeyMethod extends Schema.Schema.Type<typeof KeyMethod> {}
 export const KeyMethod = Schema.Struct({
   type: Schema.Literal("key"),
   label: optional(Schema.String),
+  prompts: optional(Schema.Array(Prompt)),
 }).annotate({ identifier: "Integration.KeyMethod" })
 
 export interface EnvMethod extends Schema.Schema.Type<typeof EnvMethod> {}
@@ -73,7 +75,7 @@ export const Method = Schema.Union([OAuthMethod, KeyMethod, EnvMethod])
   .annotate({ identifier: "Integration.Method" })
 export type Method = typeof Method.Type
 
-export const Inputs = Schema.Record(Schema.String, Schema.String).annotate({ identifier: "Integration.Inputs" })
+export const Inputs = IntegrationInputs
 export type Inputs = typeof Inputs.Type
 
 const Updated = define({

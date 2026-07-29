@@ -37,7 +37,20 @@ test("exposes every standard HTTP API group", () => {
   ])
   expect(Object.keys(client.files)).toEqual(["list", "find"])
   expect(Object.keys(client.ptys)).toEqual(["list", "create", "get", "update", "remove"])
-  expect(Object.keys(client.issueWatchers)).toEqual(["list", "create", "get", "update", "archive", "enable"])
+  expect(Object.keys(client.issueWatchers)).toEqual([
+    "sources",
+    "verifySource",
+    "createConnection",
+    "rotateConnection",
+    "getSettings",
+    "updateSettings",
+    "list",
+    "create",
+    "get",
+    "update",
+    "archive",
+    "enable",
+  ])
 })
 
 test("sessions.get returns the wire projection", async () => {

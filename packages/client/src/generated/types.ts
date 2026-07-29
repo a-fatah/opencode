@@ -21,6 +21,49 @@ export type InvalidRequestError = {
 export const isInvalidRequestError = (value: unknown): value is InvalidRequestError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "InvalidRequestError"
 
+export type IssueIntegrationNotFoundError = {
+  readonly _tag: "IssueIntegrationNotFoundError"
+  readonly integrationID: string
+  readonly message: string
+}
+export const isIssueIntegrationNotFoundError = (value: unknown): value is IssueIntegrationNotFoundError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "IssueIntegrationNotFoundError"
+
+export type IssueIntegrationConnectionNotFoundError = {
+  readonly _tag: "IssueIntegrationConnectionNotFoundError"
+  readonly connectionID: string
+  readonly message: string
+}
+export const isIssueIntegrationConnectionNotFoundError = (
+  value: unknown,
+): value is IssueIntegrationConnectionNotFoundError =>
+  typeof value === "object" &&
+  value !== null &&
+  "_tag" in value &&
+  value["_tag"] === "IssueIntegrationConnectionNotFoundError"
+
+export type IssueIntegrationAuthenticationError = {
+  readonly _tag: "IssueIntegrationAuthenticationError"
+  readonly message: string
+}
+export const isIssueIntegrationAuthenticationError = (value: unknown): value is IssueIntegrationAuthenticationError =>
+  typeof value === "object" &&
+  value !== null &&
+  "_tag" in value &&
+  value["_tag"] === "IssueIntegrationAuthenticationError"
+
+export type IssueIntegrationProviderError = { readonly _tag: "IssueIntegrationProviderError"; readonly message: string }
+export const isIssueIntegrationProviderError = (value: unknown): value is IssueIntegrationProviderError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "IssueIntegrationProviderError"
+
+export type IssueIntegrationTenantConflict = {
+  readonly _tag: "IssueIntegrationTenantConflict"
+  readonly connectionID: string
+  readonly message: string
+}
+export const isIssueIntegrationTenantConflict = (value: unknown): value is IssueIntegrationTenantConflict =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "IssueIntegrationTenantConflict"
+
 export type IssueWatcherOwnerConflict = { readonly _tag: "IssueWatcherOwnerConflict"; readonly message: string }
 export const isIssueWatcherOwnerConflict = (value: unknown): value is IssueWatcherOwnerConflict =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "IssueWatcherOwnerConflict"
@@ -114,6 +157,329 @@ export const isProjectCopyError = (value: unknown): value is ProjectCopyError =>
   typeof value === "object" && value !== null && "name" in value && value["name"] === "ProjectCopyError"
 
 export type HealthGetOutput = { readonly healthy: true }
+
+export type IssueWatchersSourcesOutput = ReadonlyArray<{
+  readonly integration: {
+    readonly id: string
+    readonly name: string
+    readonly methods: ReadonlyArray<
+      | {
+          readonly id: string
+          readonly type: "oauth"
+          readonly label: string
+          readonly prompts?: ReadonlyArray<
+            | {
+                readonly type: "text"
+                readonly key: string
+                readonly message: string
+                readonly placeholder?: string
+                readonly when?: { readonly key: string; readonly op: "eq" | "neq"; readonly value: string }
+              }
+            | {
+                readonly type: "select"
+                readonly key: string
+                readonly message: string
+                readonly options: ReadonlyArray<{
+                  readonly label: string
+                  readonly value: string
+                  readonly hint?: string
+                }>
+                readonly when?: { readonly key: string; readonly op: "eq" | "neq"; readonly value: string }
+              }
+          >
+        }
+      | {
+          readonly type: "key"
+          readonly label?: string
+          readonly prompts?: ReadonlyArray<
+            | {
+                readonly type: "text"
+                readonly key: string
+                readonly message: string
+                readonly placeholder?: string
+                readonly when?: { readonly key: string; readonly op: "eq" | "neq"; readonly value: string }
+              }
+            | {
+                readonly type: "select"
+                readonly key: string
+                readonly message: string
+                readonly options: ReadonlyArray<{
+                  readonly label: string
+                  readonly value: string
+                  readonly hint?: string
+                }>
+                readonly when?: { readonly key: string; readonly op: "eq" | "neq"; readonly value: string }
+              }
+          >
+        }
+      | { readonly type: "env"; readonly names: ReadonlyArray<string> }
+    >
+    readonly connections: ReadonlyArray<
+      | { readonly type: "credential"; readonly id: string; readonly label: string }
+      | { readonly type: "env"; readonly name: string }
+    >
+  }
+  readonly connection?: {
+    readonly id: string
+    readonly label: string
+    readonly tenantIdentity: string
+    readonly inputs: { readonly [x: string]: string }
+    readonly verification: {
+      readonly status: "connected" | "needs_auth" | "not_connected"
+      readonly detail: string
+      readonly checkedAt: number
+    }
+  }
+  readonly watcherCount: number
+  readonly lastPollAt?: number
+  readonly owner: { readonly status: "active" | "owner_conflict" | "disabled"; readonly detail?: string }
+}>
+
+export type IssueWatchersVerifySourceInput = {
+  readonly integrationID: { readonly integrationID: string }["integrationID"]
+  readonly key?: {
+    readonly key?: string
+    readonly inputs: { readonly [x: string]: string }
+    readonly useSavedConnection?: boolean
+  }["key"]
+  readonly inputs: {
+    readonly key?: string
+    readonly inputs: { readonly [x: string]: string }
+    readonly useSavedConnection?: boolean
+  }["inputs"]
+  readonly useSavedConnection?: {
+    readonly key?: string
+    readonly inputs: { readonly [x: string]: string }
+    readonly useSavedConnection?: boolean
+  }["useSavedConnection"]
+}
+
+export type IssueWatchersVerifySourceOutput = { readonly ok: boolean; readonly detail: string }
+
+export type IssueWatchersCreateConnectionInput = {
+  readonly integrationID: { readonly integrationID: string }["integrationID"]
+  readonly key: {
+    readonly key: string
+    readonly inputs: { readonly [x: string]: string }
+    readonly label?: string
+  }["key"]
+  readonly inputs: {
+    readonly key: string
+    readonly inputs: { readonly [x: string]: string }
+    readonly label?: string
+  }["inputs"]
+  readonly label?: {
+    readonly key: string
+    readonly inputs: { readonly [x: string]: string }
+    readonly label?: string
+  }["label"]
+}
+
+export type IssueWatchersCreateConnectionOutput = {
+  readonly integration: {
+    readonly id: string
+    readonly name: string
+    readonly methods: ReadonlyArray<
+      | {
+          readonly id: string
+          readonly type: "oauth"
+          readonly label: string
+          readonly prompts?: ReadonlyArray<
+            | {
+                readonly type: "text"
+                readonly key: string
+                readonly message: string
+                readonly placeholder?: string
+                readonly when?: { readonly key: string; readonly op: "eq" | "neq"; readonly value: string }
+              }
+            | {
+                readonly type: "select"
+                readonly key: string
+                readonly message: string
+                readonly options: ReadonlyArray<{
+                  readonly label: string
+                  readonly value: string
+                  readonly hint?: string
+                }>
+                readonly when?: { readonly key: string; readonly op: "eq" | "neq"; readonly value: string }
+              }
+          >
+        }
+      | {
+          readonly type: "key"
+          readonly label?: string
+          readonly prompts?: ReadonlyArray<
+            | {
+                readonly type: "text"
+                readonly key: string
+                readonly message: string
+                readonly placeholder?: string
+                readonly when?: { readonly key: string; readonly op: "eq" | "neq"; readonly value: string }
+              }
+            | {
+                readonly type: "select"
+                readonly key: string
+                readonly message: string
+                readonly options: ReadonlyArray<{
+                  readonly label: string
+                  readonly value: string
+                  readonly hint?: string
+                }>
+                readonly when?: { readonly key: string; readonly op: "eq" | "neq"; readonly value: string }
+              }
+          >
+        }
+      | { readonly type: "env"; readonly names: ReadonlyArray<string> }
+    >
+    readonly connections: ReadonlyArray<
+      | { readonly type: "credential"; readonly id: string; readonly label: string }
+      | { readonly type: "env"; readonly name: string }
+    >
+  }
+  readonly connection?: {
+    readonly id: string
+    readonly label: string
+    readonly tenantIdentity: string
+    readonly inputs: { readonly [x: string]: string }
+    readonly verification: {
+      readonly status: "connected" | "needs_auth" | "not_connected"
+      readonly detail: string
+      readonly checkedAt: number
+    }
+  }
+  readonly watcherCount: number
+  readonly lastPollAt?: number
+  readonly owner: { readonly status: "active" | "owner_conflict" | "disabled"; readonly detail?: string }
+}
+
+export type IssueWatchersRotateConnectionInput = {
+  readonly integrationID: { readonly integrationID: string; readonly connectionID: string }["integrationID"]
+  readonly connectionID: { readonly integrationID: string; readonly connectionID: string }["connectionID"]
+  readonly key?: {
+    readonly key?: string
+    readonly inputs: { readonly [x: string]: string }
+    readonly label?: string
+  }["key"]
+  readonly inputs: {
+    readonly key?: string
+    readonly inputs: { readonly [x: string]: string }
+    readonly label?: string
+  }["inputs"]
+  readonly label?: {
+    readonly key?: string
+    readonly inputs: { readonly [x: string]: string }
+    readonly label?: string
+  }["label"]
+}
+
+export type IssueWatchersRotateConnectionOutput = {
+  readonly integration: {
+    readonly id: string
+    readonly name: string
+    readonly methods: ReadonlyArray<
+      | {
+          readonly id: string
+          readonly type: "oauth"
+          readonly label: string
+          readonly prompts?: ReadonlyArray<
+            | {
+                readonly type: "text"
+                readonly key: string
+                readonly message: string
+                readonly placeholder?: string
+                readonly when?: { readonly key: string; readonly op: "eq" | "neq"; readonly value: string }
+              }
+            | {
+                readonly type: "select"
+                readonly key: string
+                readonly message: string
+                readonly options: ReadonlyArray<{
+                  readonly label: string
+                  readonly value: string
+                  readonly hint?: string
+                }>
+                readonly when?: { readonly key: string; readonly op: "eq" | "neq"; readonly value: string }
+              }
+          >
+        }
+      | {
+          readonly type: "key"
+          readonly label?: string
+          readonly prompts?: ReadonlyArray<
+            | {
+                readonly type: "text"
+                readonly key: string
+                readonly message: string
+                readonly placeholder?: string
+                readonly when?: { readonly key: string; readonly op: "eq" | "neq"; readonly value: string }
+              }
+            | {
+                readonly type: "select"
+                readonly key: string
+                readonly message: string
+                readonly options: ReadonlyArray<{
+                  readonly label: string
+                  readonly value: string
+                  readonly hint?: string
+                }>
+                readonly when?: { readonly key: string; readonly op: "eq" | "neq"; readonly value: string }
+              }
+          >
+        }
+      | { readonly type: "env"; readonly names: ReadonlyArray<string> }
+    >
+    readonly connections: ReadonlyArray<
+      | { readonly type: "credential"; readonly id: string; readonly label: string }
+      | { readonly type: "env"; readonly name: string }
+    >
+  }
+  readonly connection?: {
+    readonly id: string
+    readonly label: string
+    readonly tenantIdentity: string
+    readonly inputs: { readonly [x: string]: string }
+    readonly verification: {
+      readonly status: "connected" | "needs_auth" | "not_connected"
+      readonly detail: string
+      readonly checkedAt: number
+    }
+  }
+  readonly watcherCount: number
+  readonly lastPollAt?: number
+  readonly owner: { readonly status: "active" | "owner_conflict" | "disabled"; readonly detail?: string }
+}
+
+export type IssueWatchersGetSettingsOutput = {
+  readonly pollInterval: number
+  readonly concurrentRuns: number
+  readonly retryFailedRuns: "never" | "once"
+  readonly owner: { readonly status: "active" | "owner_conflict" | "disabled"; readonly detail?: string }
+}
+
+export type IssueWatchersUpdateSettingsInput = {
+  readonly pollInterval: {
+    readonly pollInterval: number
+    readonly concurrentRuns: number
+    readonly retryFailedRuns: "never" | "once"
+  }["pollInterval"]
+  readonly concurrentRuns: {
+    readonly pollInterval: number
+    readonly concurrentRuns: number
+    readonly retryFailedRuns: "never" | "once"
+  }["concurrentRuns"]
+  readonly retryFailedRuns: {
+    readonly pollInterval: number
+    readonly concurrentRuns: number
+    readonly retryFailedRuns: "never" | "once"
+  }["retryFailedRuns"]
+}
+
+export type IssueWatchersUpdateSettingsOutput = {
+  readonly pollInterval: number
+  readonly concurrentRuns: number
+  readonly retryFailedRuns: "never" | "once"
+  readonly owner: { readonly status: "active" | "owner_conflict" | "disabled"; readonly detail?: string }
+}
 
 export type IssueWatchersListOutput = ReadonlyArray<{
   readonly id: string
@@ -2902,7 +3268,30 @@ export type IntegrationsListOutput = {
               }
           >
         }
-      | { readonly type: "key"; readonly label?: string }
+      | {
+          readonly type: "key"
+          readonly label?: string
+          readonly prompts?: ReadonlyArray<
+            | {
+                readonly type: "text"
+                readonly key: string
+                readonly message: string
+                readonly placeholder?: string
+                readonly when?: { readonly key: string; readonly op: "eq" | "neq"; readonly value: string }
+              }
+            | {
+                readonly type: "select"
+                readonly key: string
+                readonly message: string
+                readonly options: ReadonlyArray<{
+                  readonly label: string
+                  readonly value: string
+                  readonly hint?: string
+                }>
+                readonly when?: { readonly key: string; readonly op: "eq" | "neq"; readonly value: string }
+              }
+          >
+        }
       | { readonly type: "env"; readonly names: ReadonlyArray<string> }
     >
     readonly connections: ReadonlyArray<
@@ -2954,7 +3343,30 @@ export type IntegrationsGetOutput = {
               }
           >
         }
-      | { readonly type: "key"; readonly label?: string }
+      | {
+          readonly type: "key"
+          readonly label?: string
+          readonly prompts?: ReadonlyArray<
+            | {
+                readonly type: "text"
+                readonly key: string
+                readonly message: string
+                readonly placeholder?: string
+                readonly when?: { readonly key: string; readonly op: "eq" | "neq"; readonly value: string }
+              }
+            | {
+                readonly type: "select"
+                readonly key: string
+                readonly message: string
+                readonly options: ReadonlyArray<{
+                  readonly label: string
+                  readonly value: string
+                  readonly hint?: string
+                }>
+                readonly when?: { readonly key: string; readonly op: "eq" | "neq"; readonly value: string }
+              }
+          >
+        }
       | { readonly type: "env"; readonly names: ReadonlyArray<string> }
     >
     readonly connections: ReadonlyArray<

@@ -1,5 +1,15 @@
 import type {
   HealthGetOutput,
+  IssueWatchersSourcesOutput,
+  IssueWatchersVerifySourceInput,
+  IssueWatchersVerifySourceOutput,
+  IssueWatchersCreateConnectionInput,
+  IssueWatchersCreateConnectionOutput,
+  IssueWatchersRotateConnectionInput,
+  IssueWatchersRotateConnectionOutput,
+  IssueWatchersGetSettingsOutput,
+  IssueWatchersUpdateSettingsInput,
+  IssueWatchersUpdateSettingsOutput,
   IssueWatchersListOutput,
   IssueWatchersCreateInput,
   IssueWatchersCreateOutput,
@@ -266,6 +276,80 @@ export function make(options: ClientOptions) {
         ),
     },
     issueWatchers: {
+      sources: (requestOptions?: RequestOptions) =>
+        request<IssueWatchersSourcesOutput>(
+          {
+            method: "GET",
+            path: `/api/issue-watcher/integrations`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      verifySource: (input: IssueWatchersVerifySourceInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersVerifySourceOutput>(
+          {
+            method: "POST",
+            path: `/api/issue-watcher/integrations/${encodeURIComponent(input.integrationID)}/verify`,
+            body: { key: input["key"], inputs: input["inputs"], useSavedConnection: input["useSavedConnection"] },
+            successStatus: 200,
+            declaredStatuses: [400, 404, 401, 502],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      createConnection: (input: IssueWatchersCreateConnectionInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersCreateConnectionOutput>(
+          {
+            method: "PUT",
+            path: `/api/issue-watcher/integrations/${encodeURIComponent(input.integrationID)}/connection`,
+            body: { key: input["key"], inputs: input["inputs"], label: input["label"] },
+            successStatus: 200,
+            declaredStatuses: [400, 404, 401, 502],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      rotateConnection: (input: IssueWatchersRotateConnectionInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersRotateConnectionOutput>(
+          {
+            method: "PATCH",
+            path: `/api/issue-watcher/integrations/${encodeURIComponent(input.integrationID)}/connection/${encodeURIComponent(input.connectionID)}`,
+            body: { key: input["key"], inputs: input["inputs"], label: input["label"] },
+            successStatus: 200,
+            declaredStatuses: [400, 404, 401, 502, 409],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      getSettings: (requestOptions?: RequestOptions) =>
+        request<IssueWatchersGetSettingsOutput>(
+          {
+            method: "GET",
+            path: `/api/issue-watcher/settings`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      updateSettings: (input: IssueWatchersUpdateSettingsInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersUpdateSettingsOutput>(
+          {
+            method: "PATCH",
+            path: `/api/issue-watcher/settings`,
+            body: {
+              pollInterval: input["pollInterval"],
+              concurrentRuns: input["concurrentRuns"],
+              retryFailedRuns: input["retryFailedRuns"],
+            },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
       list: (requestOptions?: RequestOptions) =>
         request<IssueWatchersListOutput>(
           {

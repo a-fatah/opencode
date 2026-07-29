@@ -1,8 +1,10 @@
 import { dict as en } from "./en"
+import { integrationStrings } from "./integrations"
 
 type Keys = keyof typeof en
 
 export const dict = {
+  ...integrationStrings,
   "command.category.suggested": "Önerilen",
   "command.category.view": "Görünüm",
   "command.category.project": "Proje",

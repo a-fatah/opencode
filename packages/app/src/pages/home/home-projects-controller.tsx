@@ -21,7 +21,7 @@ export function createHomeProjectsController(home: HomeController) {
   const dialog = useDialog()
   const language = useLanguage()
   const notification = useNotification()
-  const openSettings = useSettingsCommand()
+  const openSettings = useSettingsCommand(() => home.selection.value().server)
   const serverManagement = useServerManagementController({ navigateOnAdd: false })
   const [_state, setState, _, ready] = persisted(
     Persist.global("home.servers", ["home.servers.v1"]),

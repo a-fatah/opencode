@@ -14,30 +14,34 @@ const makeDatabase = EffectDrizzleSqlite.makeWithDefaults()
 type DatabaseShape = Effect.Success<typeof makeDatabase>
 
 export interface Interface {
-  db: DatabaseShape
+  readonly db: DatabaseShape
+  readonly filename: string
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/storage/Database") {}
 
-const layer = Layer.effect(
-  Service,
-  Effect.gen(function* () {
-    const db = yield* makeDatabase
+function layer(filename: string) {
+  return Layer.effect(
+    Service,
+    Effect.gen(function* () {
+      const db = yield* makeDatabase
 
-    yield* db.run("PRAGMA journal_mode = WAL")
-    yield* db.run("PRAGMA synchronous = NORMAL")
-    yield* db.run("PRAGMA busy_timeout = 5000")
-    yield* db.run("PRAGMA cache_size = -64000")
-    yield* db.run("PRAGMA foreign_keys = ON")
-    yield* db.run("PRAGMA wal_checkpoint(PASSIVE)")
-    yield* DatabaseMigration.apply(db)
+      yield* db.run("PRAGMA journal_mode = WAL")
+      yield* db.run("PRAGMA synchronous = NORMAL")
+      yield* db.run("PRAGMA busy_timeout = 5000")
+      yield* db.run("PRAGMA cache_size = -64000")
+      yield* db.run("PRAGMA foreign_keys = ON")
+      yield* db.run("PRAGMA wal_checkpoint(PASSIVE)")
+      yield* DatabaseMigration.apply(db)
 
-    return { db }
-  }).pipe(Effect.orDie),
-)
+      return { db, filename }
+    }).pipe(Effect.orDie),
+  )
+}
 
 export function layerFromPath(filename: string) {
-  return layer.pipe(Layer.provide(sqliteLayer({ filename })))
+  const resolved = filename === ":memory:" ? filename : isAbsolute(filename) ? filename : join(process.cwd(), filename)
+  return layer(resolved).pipe(Layer.provide(sqliteLayer({ filename: resolved })))
 }
 
 export function path() {

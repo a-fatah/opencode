@@ -1,8 +1,10 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "f14a9b18-8207-487e-a3d3-227e629ba9ad",
-  "prevIds": ["169a0f0f-d58f-479f-b024-fa1c7b9a09db"],
+  "id": "3ca767b1-00bf-47af-8ed5-b7f43ef48115",
+  "prevIds": [
+    "f14a9b18-8207-487e-a3d3-227e629ba9ad"
+  ],
   "ddl": [
     {
       "name": "workspace",
@@ -34,6 +36,46 @@
     },
     {
       "name": "event",
+      "entityType": "tables"
+    },
+    {
+      "name": "issue_match_observation",
+      "entityType": "tables"
+    },
+    {
+      "name": "issue_match_session",
+      "entityType": "tables"
+    },
+    {
+      "name": "issue_match",
+      "entityType": "tables"
+    },
+    {
+      "name": "issue_materialization",
+      "entityType": "tables"
+    },
+    {
+      "name": "issue_session_claim",
+      "entityType": "tables"
+    },
+    {
+      "name": "issue_watcher_ignore",
+      "entityType": "tables"
+    },
+    {
+      "name": "issue_watcher_run",
+      "entityType": "tables"
+    },
+    {
+      "name": "issue_watcher",
+      "entityType": "tables"
+    },
+    {
+      "name": "issue_writeback_operation",
+      "entityType": "tables"
+    },
+    {
+      "name": "session_provenance",
       "entityType": "tables"
     },
     {
@@ -539,6 +581,1136 @@
       "name": "data",
       "entityType": "columns",
       "table": "event"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "issue_match_observation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "match_id",
+      "entityType": "columns",
+      "table": "issue_match_observation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "issue_match_observation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "fingerprint",
+      "entityType": "columns",
+      "table": "issue_match_observation"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "external_updated_at",
+      "entityType": "columns",
+      "table": "issue_match_observation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "payload",
+      "entityType": "columns",
+      "table": "issue_match_observation"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "issue_match_observation"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "issue_match_observation"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "issue_match_session"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "match_id",
+      "entityType": "columns",
+      "table": "issue_match_session"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "issue_match_session"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "false",
+      "generated": null,
+      "name": "is_primary",
+      "entityType": "columns",
+      "table": "issue_match_session"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "reason",
+      "entityType": "columns",
+      "table": "issue_match_session"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "deleted_at",
+      "entityType": "columns",
+      "table": "issue_match_session"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "issue_match_session"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "issue_match_session"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "issue_match"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "watcher_id",
+      "entityType": "columns",
+      "table": "issue_match"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "integration_id",
+      "entityType": "columns",
+      "table": "issue_match"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "connection_id",
+      "entityType": "columns",
+      "table": "issue_match"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "external_id",
+      "entityType": "columns",
+      "table": "issue_match"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "external_key",
+      "entityType": "columns",
+      "table": "issue_match"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "external_url",
+      "entityType": "columns",
+      "table": "issue_match"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "fingerprint",
+      "entityType": "columns",
+      "table": "issue_match"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "external_updated_at",
+      "entityType": "columns",
+      "table": "issue_match"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "state",
+      "entityType": "columns",
+      "table": "issue_match"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "project_id",
+      "entityType": "columns",
+      "table": "issue_match"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "route_reason",
+      "entityType": "columns",
+      "table": "issue_match"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "payload",
+      "entityType": "columns",
+      "table": "issue_match"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "error",
+      "entityType": "columns",
+      "table": "issue_match"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "issue_match"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "issue_match"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "issue_materialization"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "match_id",
+      "entityType": "columns",
+      "table": "issue_materialization"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mode",
+      "entityType": "columns",
+      "table": "issue_materialization"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "project_id",
+      "entityType": "columns",
+      "table": "issue_materialization"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "workspace",
+      "entityType": "columns",
+      "table": "issue_materialization"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "resolved_location",
+      "entityType": "columns",
+      "table": "issue_materialization"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "workspace_lease",
+      "entityType": "columns",
+      "table": "issue_materialization"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "baseline_observation_id",
+      "entityType": "columns",
+      "table": "issue_materialization"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "state",
+      "entityType": "columns",
+      "table": "issue_materialization"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "issue_materialization"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "message_id",
+      "entityType": "columns",
+      "table": "issue_materialization"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "execution_attempt_id",
+      "entityType": "columns",
+      "table": "issue_materialization"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "false",
+      "generated": null,
+      "name": "provider_started",
+      "entityType": "columns",
+      "table": "issue_materialization"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "attempts",
+      "entityType": "columns",
+      "table": "issue_materialization"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "error",
+      "entityType": "columns",
+      "table": "issue_materialization"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "issue_materialization"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "issue_materialization"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "connection_id",
+      "entityType": "columns",
+      "table": "issue_session_claim"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "external_id",
+      "entityType": "columns",
+      "table": "issue_session_claim"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "primary_session_id",
+      "entityType": "columns",
+      "table": "issue_session_claim"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "materialization_id",
+      "entityType": "columns",
+      "table": "issue_session_claim"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "issue_session_claim"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "issue_session_claim"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "watcher_id",
+      "entityType": "columns",
+      "table": "issue_watcher_ignore"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "external_id",
+      "entityType": "columns",
+      "table": "issue_watcher_ignore"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "reason",
+      "entityType": "columns",
+      "table": "issue_watcher_ignore"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "issue_watcher_ignore"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "issue_watcher_ignore"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "issue_watcher_run"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "watcher_id",
+      "entityType": "columns",
+      "table": "issue_watcher_run"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "started_at",
+      "entityType": "columns",
+      "table": "issue_watcher_run"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "finished_at",
+      "entityType": "columns",
+      "table": "issue_watcher_run"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "outcome",
+      "entityType": "columns",
+      "table": "issue_watcher_run"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "scanned",
+      "entityType": "columns",
+      "table": "issue_watcher_run"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "matched",
+      "entityType": "columns",
+      "table": "issue_watcher_run"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "created",
+      "entityType": "columns",
+      "table": "issue_watcher_run"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "queued",
+      "entityType": "columns",
+      "table": "issue_watcher_run"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "unrouted",
+      "entityType": "columns",
+      "table": "issue_watcher_run"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "skipped",
+      "entityType": "columns",
+      "table": "issue_watcher_run"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "failed",
+      "entityType": "columns",
+      "table": "issue_watcher_run"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "cursor",
+      "entityType": "columns",
+      "table": "issue_watcher_run"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "error",
+      "entityType": "columns",
+      "table": "issue_watcher_run"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "issue_watcher"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "integration_id",
+      "entityType": "columns",
+      "table": "issue_watcher"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "connection_id",
+      "entityType": "columns",
+      "table": "issue_watcher"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "name",
+      "entityType": "columns",
+      "table": "issue_watcher"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "true",
+      "generated": null,
+      "name": "enabled",
+      "entityType": "columns",
+      "table": "issue_watcher"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "project_id",
+      "entityType": "columns",
+      "table": "issue_watcher"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "criteria",
+      "entityType": "columns",
+      "table": "issue_watcher"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "routing",
+      "entityType": "columns",
+      "table": "issue_watcher"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "action",
+      "entityType": "columns",
+      "table": "issue_watcher"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "cursor",
+      "entityType": "columns",
+      "table": "issue_watcher"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "last_run_at",
+      "entityType": "columns",
+      "table": "issue_watcher"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "last_error",
+      "entityType": "columns",
+      "table": "issue_watcher"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "archived_at",
+      "entityType": "columns",
+      "table": "issue_watcher"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "issue_watcher"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "issue_watcher"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "issue_writeback_operation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "issue_writeback_operation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "kind",
+      "entityType": "columns",
+      "table": "issue_writeback_operation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "trigger_id",
+      "entityType": "columns",
+      "table": "issue_writeback_operation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "request",
+      "entityType": "columns",
+      "table": "issue_writeback_operation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "state",
+      "entityType": "columns",
+      "table": "issue_writeback_operation"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "provider_result_id",
+      "entityType": "columns",
+      "table": "issue_writeback_operation"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "attempts",
+      "entityType": "columns",
+      "table": "issue_writeback_operation"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "error",
+      "entityType": "columns",
+      "table": "issue_writeback_operation"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "issue_writeback_operation"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "issue_writeback_operation"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "session_provenance"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "kind",
+      "entityType": "columns",
+      "table": "session_provenance"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "watcher_id",
+      "entityType": "columns",
+      "table": "session_provenance"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "match_id",
+      "entityType": "columns",
+      "table": "session_provenance"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "integration_id",
+      "entityType": "columns",
+      "table": "session_provenance"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "connection_id",
+      "entityType": "columns",
+      "table": "session_provenance"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "external_key",
+      "entityType": "columns",
+      "table": "session_provenance"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "external_url",
+      "entityType": "columns",
+      "table": "session_provenance"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "watcher_name",
+      "entityType": "columns",
+      "table": "session_provenance"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "branch",
+      "entityType": "columns",
+      "table": "session_provenance"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "last_synced_at",
+      "entityType": "columns",
+      "table": "session_provenance"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "session_provenance"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "session_provenance"
     },
     {
       "type": "text",
@@ -1481,9 +2653,13 @@
       "table": "session_share"
     },
     {
-      "columns": ["project_id"],
+      "columns": [
+        "project_id"
+      ],
       "tableTo": "project",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -1492,9 +2668,13 @@
       "table": "workspace"
     },
     {
-      "columns": ["active_account_id"],
+      "columns": [
+        "active_account_id"
+      ],
       "tableTo": "account",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "SET NULL",
       "nameExplicit": false,
@@ -1503,9 +2683,13 @@
       "table": "account_state"
     },
     {
-      "columns": ["aggregate_id"],
+      "columns": [
+        "aggregate_id"
+      ],
       "tableTo": "event_sequence",
-      "columnsTo": ["aggregate_id"],
+      "columnsTo": [
+        "aggregate_id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -1514,9 +2698,193 @@
       "table": "event"
     },
     {
-      "columns": ["project_id"],
+      "columns": [
+        "match_id"
+      ],
+      "tableTo": "issue_match",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_issue_match_observation_match_id_issue_match_id_fk",
+      "entityType": "fks",
+      "table": "issue_match_observation"
+    },
+    {
+      "columns": [
+        "run_id"
+      ],
+      "tableTo": "issue_watcher_run",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_issue_match_observation_run_id_issue_watcher_run_id_fk",
+      "entityType": "fks",
+      "table": "issue_match_observation"
+    },
+    {
+      "columns": [
+        "match_id"
+      ],
+      "tableTo": "issue_match",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_issue_match_session_match_id_issue_match_id_fk",
+      "entityType": "fks",
+      "table": "issue_match_session"
+    },
+    {
+      "columns": [
+        "watcher_id"
+      ],
+      "tableTo": "issue_watcher",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_issue_match_watcher_id_issue_watcher_id_fk",
+      "entityType": "fks",
+      "table": "issue_match"
+    },
+    {
+      "columns": [
+        "match_id"
+      ],
+      "tableTo": "issue_match",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_issue_materialization_match_id_issue_match_id_fk",
+      "entityType": "fks",
+      "table": "issue_materialization"
+    },
+    {
+      "columns": [
+        "baseline_observation_id"
+      ],
+      "tableTo": "issue_match_observation",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_issue_materialization_baseline_observation_id_issue_match_observation_id_fk",
+      "entityType": "fks",
+      "table": "issue_materialization"
+    },
+    {
+      "columns": [
+        "watcher_id"
+      ],
+      "tableTo": "issue_watcher",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_issue_watcher_ignore_watcher_id_issue_watcher_id_fk",
+      "entityType": "fks",
+      "table": "issue_watcher_ignore"
+    },
+    {
+      "columns": [
+        "watcher_id"
+      ],
+      "tableTo": "issue_watcher",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_issue_watcher_run_watcher_id_issue_watcher_id_fk",
+      "entityType": "fks",
+      "table": "issue_watcher_run"
+    },
+    {
+      "columns": [
+        "project_id"
+      ],
       "tableTo": "project",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_issue_watcher_project_id_project_id_fk",
+      "entityType": "fks",
+      "table": "issue_watcher"
+    },
+    {
+      "columns": [
+        "session_id"
+      ],
+      "tableTo": "session",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_session_provenance_session_id_session_id_fk",
+      "entityType": "fks",
+      "table": "session_provenance"
+    },
+    {
+      "columns": [
+        "watcher_id"
+      ],
+      "tableTo": "issue_watcher",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "SET NULL",
+      "nameExplicit": false,
+      "name": "fk_session_provenance_watcher_id_issue_watcher_id_fk",
+      "entityType": "fks",
+      "table": "session_provenance"
+    },
+    {
+      "columns": [
+        "match_id"
+      ],
+      "tableTo": "issue_match",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "SET NULL",
+      "nameExplicit": false,
+      "name": "fk_session_provenance_match_id_issue_match_id_fk",
+      "entityType": "fks",
+      "table": "session_provenance"
+    },
+    {
+      "columns": [
+        "project_id"
+      ],
+      "tableTo": "project",
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -1525,9 +2893,13 @@
       "table": "permission"
     },
     {
-      "columns": ["project_id"],
+      "columns": [
+        "project_id"
+      ],
       "tableTo": "project",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -1536,9 +2908,13 @@
       "table": "project_directory"
     },
     {
-      "columns": ["session_id"],
+      "columns": [
+        "session_id"
+      ],
       "tableTo": "session",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -1547,9 +2923,13 @@
       "table": "message"
     },
     {
-      "columns": ["message_id"],
+      "columns": [
+        "message_id"
+      ],
       "tableTo": "message",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -1558,9 +2938,13 @@
       "table": "part"
     },
     {
-      "columns": ["session_id"],
+      "columns": [
+        "session_id"
+      ],
       "tableTo": "session",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -1569,9 +2953,13 @@
       "table": "session_context_epoch"
     },
     {
-      "columns": ["session_id"],
+      "columns": [
+        "session_id"
+      ],
       "tableTo": "session",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -1580,9 +2968,13 @@
       "table": "session_input"
     },
     {
-      "columns": ["session_id"],
+      "columns": [
+        "session_id"
+      ],
       "tableTo": "session",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -1591,9 +2983,13 @@
       "table": "session_message"
     },
     {
-      "columns": ["project_id"],
+      "columns": [
+        "project_id"
+      ],
       "tableTo": "project",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -1602,9 +2998,13 @@
       "table": "session"
     },
     {
-      "columns": ["session_id"],
+      "columns": [
+        "session_id"
+      ],
       "tableTo": "session",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -1613,9 +3013,13 @@
       "table": "todo"
     },
     {
-      "columns": ["session_id"],
+      "columns": [
+        "session_id"
+      ],
       "tableTo": "session",
-      "columnsTo": ["id"],
+      "columnsTo": [
+        "id"
+      ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -1624,133 +3028,266 @@
       "table": "session_share"
     },
     {
-      "columns": ["email", "url"],
+      "columns": [
+        "email",
+        "url"
+      ],
       "nameExplicit": false,
       "name": "control_account_pk",
       "entityType": "pks",
       "table": "control_account"
     },
     {
-      "columns": ["project_id", "directory"],
+      "columns": [
+        "connection_id",
+        "external_id"
+      ],
+      "nameExplicit": false,
+      "name": "issue_session_claim_pk",
+      "entityType": "pks",
+      "table": "issue_session_claim"
+    },
+    {
+      "columns": [
+        "watcher_id",
+        "external_id"
+      ],
+      "nameExplicit": false,
+      "name": "issue_watcher_ignore_pk",
+      "entityType": "pks",
+      "table": "issue_watcher_ignore"
+    },
+    {
+      "columns": [
+        "project_id",
+        "directory"
+      ],
       "nameExplicit": false,
       "name": "project_directory_pk",
       "entityType": "pks",
       "table": "project_directory"
     },
     {
-      "columns": ["session_id", "position"],
+      "columns": [
+        "session_id",
+        "position"
+      ],
       "nameExplicit": false,
       "name": "todo_pk",
       "entityType": "pks",
       "table": "todo"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "workspace_pk",
       "table": "workspace",
       "entityType": "pks"
     },
     {
-      "columns": ["name"],
+      "columns": [
+        "name"
+      ],
       "nameExplicit": false,
       "name": "data_migration_pk",
       "table": "data_migration",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "account_state_pk",
       "table": "account_state",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "account_pk",
       "table": "account",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "credential_pk",
       "table": "credential",
       "entityType": "pks"
     },
     {
-      "columns": ["aggregate_id"],
+      "columns": [
+        "aggregate_id"
+      ],
       "nameExplicit": false,
       "name": "event_sequence_pk",
       "table": "event_sequence",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "event_pk",
       "table": "event",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "issue_match_observation_pk",
+      "table": "issue_match_observation",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "issue_match_session_pk",
+      "table": "issue_match_session",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "issue_match_pk",
+      "table": "issue_match",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "issue_materialization_pk",
+      "table": "issue_materialization",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "issue_watcher_run_pk",
+      "table": "issue_watcher_run",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "issue_watcher_pk",
+      "table": "issue_watcher",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "issue_writeback_operation_pk",
+      "table": "issue_writeback_operation",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "session_id"
+      ],
+      "nameExplicit": false,
+      "name": "session_provenance_pk",
+      "table": "session_provenance",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "permission_pk",
       "table": "permission",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "project_pk",
       "table": "project",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "message_pk",
       "table": "message",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "part_pk",
       "table": "part",
       "entityType": "pks"
     },
     {
-      "columns": ["session_id"],
+      "columns": [
+        "session_id"
+      ],
       "nameExplicit": false,
       "name": "session_context_epoch_pk",
       "table": "session_context_epoch",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "session_input_pk",
       "table": "session_input",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "session_message_pk",
       "table": "session_message",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": [
+        "id"
+      ],
       "nameExplicit": false,
       "name": "session_pk",
       "table": "session",
       "entityType": "pks"
     },
     {
-      "columns": ["session_id"],
+      "columns": [
+        "session_id"
+      ],
       "nameExplicit": false,
       "name": "session_share_pk",
       "table": "session_share",
@@ -1795,6 +3332,232 @@
       "name": "event_aggregate_type_seq_idx",
       "entityType": "indexes",
       "table": "event"
+    },
+    {
+      "columns": [
+        {
+          "value": "match_id",
+          "isExpression": false
+        },
+        {
+          "value": "fingerprint",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "issue_match_observation_match_fingerprint_uidx",
+      "entityType": "indexes",
+      "table": "issue_match_observation"
+    },
+    {
+      "columns": [
+        {
+          "value": "run_id",
+          "isExpression": false
+        },
+        {
+          "value": "time_created",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "issue_match_observation_run_created_idx",
+      "entityType": "indexes",
+      "table": "issue_match_observation"
+    },
+    {
+      "columns": [
+        {
+          "value": "match_id",
+          "isExpression": false
+        },
+        {
+          "value": "session_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "issue_match_session_match_session_uidx",
+      "entityType": "indexes",
+      "table": "issue_match_session"
+    },
+    {
+      "columns": [
+        {
+          "value": "match_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": "\"issue_match_session\".\"is_primary\" = 1",
+      "origin": "manual",
+      "name": "issue_match_session_primary_uidx",
+      "entityType": "indexes",
+      "table": "issue_match_session"
+    },
+    {
+      "columns": [
+        {
+          "value": "watcher_id",
+          "isExpression": false
+        },
+        {
+          "value": "external_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "issue_match_watcher_external_uidx",
+      "entityType": "indexes",
+      "table": "issue_match"
+    },
+    {
+      "columns": [
+        {
+          "value": "state",
+          "isExpression": false
+        },
+        {
+          "value": "time_created",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "issue_match_state_created_idx",
+      "entityType": "indexes",
+      "table": "issue_match"
+    },
+    {
+      "columns": [
+        {
+          "value": "connection_id",
+          "isExpression": false
+        },
+        {
+          "value": "external_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "issue_match_connection_external_idx",
+      "entityType": "indexes",
+      "table": "issue_match"
+    },
+    {
+      "columns": [
+        {
+          "value": "match_id",
+          "isExpression": false
+        },
+        {
+          "value": "message_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "issue_materialization_match_message_uidx",
+      "entityType": "indexes",
+      "table": "issue_materialization"
+    },
+    {
+      "columns": [
+        {
+          "value": "match_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": "\"issue_materialization\".\"state\" not in ('completed', 'failed', 'cancelled')",
+      "origin": "manual",
+      "name": "issue_materialization_match_active_uidx",
+      "entityType": "indexes",
+      "table": "issue_materialization"
+    },
+    {
+      "columns": [
+        {
+          "value": "materialization_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "issue_session_claim_materialization_uidx",
+      "entityType": "indexes",
+      "table": "issue_session_claim"
+    },
+    {
+      "columns": [
+        {
+          "value": "watcher_id",
+          "isExpression": false
+        },
+        {
+          "value": "started_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "issue_watcher_run_watcher_started_idx",
+      "entityType": "indexes",
+      "table": "issue_watcher_run"
+    },
+    {
+      "columns": [
+        {
+          "value": "session_id",
+          "isExpression": false
+        },
+        {
+          "value": "kind",
+          "isExpression": false
+        },
+        {
+          "value": "trigger_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "issue_writeback_operation_session_kind_trigger_uidx",
+      "entityType": "indexes",
+      "table": "issue_writeback_operation"
+    },
+    {
+      "columns": [
+        {
+          "value": "connection_id",
+          "isExpression": false
+        },
+        {
+          "value": "external_key",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "session_provenance_connection_key_idx",
+      "entityType": "indexes",
+      "table": "session_provenance"
     },
     {
       "columns": [

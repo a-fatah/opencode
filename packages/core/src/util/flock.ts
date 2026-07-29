@@ -289,7 +289,7 @@ export namespace Flock {
         return res
       }
 
-      if (mono() > stop) {
+      if (opts.timeoutMs === 0 || mono() > stop) {
         throw new Error(`Timed out waiting for lock: ${input.key}`)
       }
 

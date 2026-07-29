@@ -109,3 +109,18 @@ export class PtyNotFoundError extends Schema.TaggedErrorClass<PtyNotFoundError>(
   },
   { httpApiStatus: 404 },
 ) {}
+
+export class IssueWatcherNotFoundError extends Schema.TaggedErrorClass<IssueWatcherNotFoundError>()(
+  "IssueWatcherNotFoundError",
+  {
+    watcherID: Schema.String,
+    message: Schema.String,
+  },
+  { httpApiStatus: 404 },
+) {}
+
+export class IssueWatcherOwnerConflict extends Schema.TaggedErrorClass<IssueWatcherOwnerConflict>()(
+  "IssueWatcherOwnerConflict",
+  { message: Schema.String },
+  { httpApiStatus: 409 },
+) {}

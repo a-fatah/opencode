@@ -1,5 +1,16 @@
 import type {
   HealthGetOutput,
+  IssueWatchersListOutput,
+  IssueWatchersCreateInput,
+  IssueWatchersCreateOutput,
+  IssueWatchersGetInput,
+  IssueWatchersGetOutput,
+  IssueWatchersUpdateInput,
+  IssueWatchersUpdateOutput,
+  IssueWatchersArchiveInput,
+  IssueWatchersArchiveOutput,
+  IssueWatchersEnableInput,
+  IssueWatchersEnableOutput,
   LocationGetInput,
   LocationGetOutput,
   AgentsListInput,
@@ -251,6 +262,94 @@ export function make(options: ClientOptions) {
       get: (requestOptions?: RequestOptions) =>
         request<HealthGetOutput>(
           { method: "GET", path: `/api/health`, successStatus: 200, declaredStatuses: [401, 400], empty: false },
+          requestOptions,
+        ),
+    },
+    issueWatchers: {
+      list: (requestOptions?: RequestOptions) =>
+        request<IssueWatchersListOutput>(
+          {
+            method: "GET",
+            path: `/api/issue-watcher/watchers`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      create: (input: IssueWatchersCreateInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersCreateOutput>(
+          {
+            method: "POST",
+            path: `/api/issue-watcher/watchers`,
+            body: {
+              integrationID: input["integrationID"],
+              connectionID: input["connectionID"],
+              name: input["name"],
+              enabled: input["enabled"],
+              projectID: input["projectID"],
+              criteria: input["criteria"],
+              routing: input["routing"],
+              action: input["action"],
+            },
+            successStatus: 200,
+            declaredStatuses: [409, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      get: (input: IssueWatchersGetInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersGetOutput>(
+          {
+            method: "GET",
+            path: `/api/issue-watcher/watchers/${encodeURIComponent(input.watcherID)}`,
+            successStatus: 200,
+            declaredStatuses: [404, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      update: (input: IssueWatchersUpdateInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersUpdateOutput>(
+          {
+            method: "PATCH",
+            path: `/api/issue-watcher/watchers/${encodeURIComponent(input.watcherID)}`,
+            body: {
+              name: input["name"],
+              projectID: input["projectID"],
+              criteria: input["criteria"],
+              routing: input["routing"],
+              action: input["action"],
+              integrationID: input["integrationID"],
+              connectionID: input["connectionID"],
+            },
+            successStatus: 200,
+            declaredStatuses: [404, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      archive: (input: IssueWatchersArchiveInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersArchiveOutput>(
+          {
+            method: "DELETE",
+            path: `/api/issue-watcher/watchers/${encodeURIComponent(input.watcherID)}`,
+            successStatus: 204,
+            declaredStatuses: [404, 401, 400],
+            empty: true,
+          },
+          requestOptions,
+        ),
+      enable: (input: IssueWatchersEnableInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersEnableOutput>(
+          {
+            method: "POST",
+            path: `/api/issue-watcher/watchers/${encodeURIComponent(input.watcherID)}/enable`,
+            body: { enabled: input["enabled"] },
+            successStatus: 200,
+            declaredStatuses: [404, 409, 401, 400],
+            empty: false,
+          },
           requestOptions,
         ),
     },

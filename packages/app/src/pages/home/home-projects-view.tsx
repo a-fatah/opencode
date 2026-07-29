@@ -57,6 +57,7 @@ export type HomeProjectsViewProps = {
   onClearNotifications: (server: ServerConnection.Any, project: LocalProject) => void
   onCloseProject: (server: ServerConnection.Any, directory: string) => void
   onOpenInbox: () => void
+  inboxCount: Accessor<number>
   onOpenWatchers: () => void
   onOpenSettings: () => void
   onOpenHelp: () => void
@@ -149,6 +150,7 @@ export function HomeProjectsView(props: HomeProjectsViewProps) {
       <HomeUtilityNav
         class="mb-8 mt-4 hidden shrink-0 lg:flex"
         onOpenInbox={props.onOpenInbox}
+        inboxCount={props.inboxCount}
         onOpenWatchers={props.onOpenWatchers}
         onOpenSettings={props.onOpenSettings}
         onOpenHelp={props.onOpenHelp}
@@ -161,6 +163,7 @@ export function HomeProjectsView(props: HomeProjectsViewProps) {
 export function HomeUtilityNav(props: {
   class?: string
   onOpenInbox: () => void
+  inboxCount: Accessor<number>
   onOpenWatchers: () => void
   onOpenSettings: () => void
   onOpenHelp: () => void
@@ -175,6 +178,9 @@ export function HomeUtilityNav(props: {
       >
         <IconV2 name="archive" size="small" />
         <span class={HOME_PROJECT_NAV_LABEL}>{props.language.t("sidebar.inbox")}</span>
+        <Show when={props.inboxCount() > 0}>
+          <span class="ml-auto min-w-5 rounded-full bg-v2-background-bg-interactive px-1.5 text-center text-10-medium text-v2-text-text-on-brand">{props.inboxCount()}</span>
+        </Show>
       </HomeProjectNavButton>
       <HomeProjectNavButton
         type="button"

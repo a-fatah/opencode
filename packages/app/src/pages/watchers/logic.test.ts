@@ -1,5 +1,18 @@
 import { describe, expect, test } from "bun:test"
-import { canSave, criteriaSummary, emptyWatcherDraft, routeRungs, routingSummary, splitValues } from "./logic"
+import {
+  authExpiredMessage,
+  canSave,
+  criteriaSummary,
+  emptyWatcherDraft,
+  inboxActions,
+  inboxAttentionCount,
+  inboxQuery,
+  outcomeLabel,
+  routeRungs,
+  routingSummary,
+  splitValues,
+  watcherAuthExpired,
+} from "./logic"
 
 describe("watcher editor logic", () => {
   test("normalizes comma-separated rule values", () => {
@@ -33,5 +46,39 @@ describe("watcher editor logic", () => {
     draft.integrationID = "int_github"
     draft.connectionID = "cred_github"
     expect(canSave(draft)).toBe(true)
+  })
+})
+
+describe("watcher inbox logic", () => {
+  test("uses server filters for every paginated view", () => {
+    expect(inboxQuery("all")).toEqual({})
+    expect(inboxQuery("attention")).toEqual({ attention: true })
+    expect(inboxQuery("dismissed")).toEqual({ state: "dismissed" })
+    expect(inboxQuery("source:jira")).toEqual({ integrationID: "jira" })
+  })
+
+  test("describes every disabled inbox action state", () => {
+    expect(inboxActions("pending")).toEqual(["Create & run", "Awaiting run", "Skip"])
+    expect(inboxActions("unrouted")).toEqual(["Pick project", "Skip"])
+    expect(inboxActions("duplicate")).toEqual(["Open session", "Dismiss"])
+    expect(inboxActions("skipped")).toEqual(["Create & run", "Skipped"])
+    expect(inboxActions("dismissed")).toEqual(["Create & run", "Dismissed"])
+  })
+
+  test("combines attention counters and labels run outcomes", () => {
+    expect(inboxAttentionCount({ unrouted: 2, duplicate: 3, failedMaterializations: 1 })).toBe(5)
+    expect(outcomeLabel("auth_failed")).toBe("Authentication expired")
+  })
+
+  test("preserves the cursor guarantee in expired-auth copy", () => {
+    expect(authExpiredMessage("Jira", "Assigned bugs")).toBe(
+      "Jira authentication expired. Assigned bugs is paused. Its cursor was not advanced, and polling resumes from that cursor after reconnect.",
+    )
+  })
+
+  test("recognizes expired watcher authentication without treating unrelated failures as auth", () => {
+    expect(watcherAuthExpired({ watcher: { enabled: false }, connection: { verification: { status: "needs_auth" } } })).toBe(true)
+    expect(watcherAuthExpired({ watcher: { enabled: false, lastError: "Authentication failed" } })).toBe(true)
+    expect(watcherAuthExpired({ watcher: { enabled: false, lastError: "Routing failed" } })).toBe(false)
   })
 })

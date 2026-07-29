@@ -12,9 +12,11 @@ import { closeHomeProject, errorMessage, homeProjectDirectories } from "@/pages/
 import { Persist, persisted } from "@/utils/persist"
 import { showToast } from "@/utils/toast"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
-import { createResource } from "solid-js"
+import { createEffect, createResource, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import type { HomeController } from "./home-controller"
+import { issueWatcherApi } from "../watchers/api"
+import { watcherAuthExpired } from "../watchers/logic"
 
 export function createHomeProjectsController(home: HomeController) {
   const platform = usePlatform()
@@ -34,6 +36,35 @@ export function createHomeProjectsController(home: HomeController) {
     (promise) => promise.then(() => _state),
     { initialValue: _state },
   )
+  const [watchers, setWatchers] = createStore({ server: "", inboxCount: 0, authExpiredCount: 0 })
+  createEffect(() => {
+    const context = home.server.focusedContext()
+    const server = home.selection.value().server
+    if (!context) return
+    const api = issueWatcherApi(context.sdk)
+    setWatchers({ server, inboxCount: 0, authExpiredCount: 0 })
+    void Promise.all([api.inboxSummary(), api.list()])
+      .then(([summary, list]) => {
+        if (home.selection.value().server !== server) return
+        setWatchers({
+          inboxCount: summary.pending + summary.unrouted,
+          authExpiredCount: list.filter(watcherAuthExpired).length,
+        })
+      })
+      .catch(() => {})
+    context.sdk.event.start()
+    const unsub = context.sdk.event.listen(({ details }) => {
+      const event = details as unknown as { type: string; properties?: { pending: number; unrouted: number } }
+      if (event.type === "issue_watcher.inbox.changed") {
+        const summary = event.properties
+        if (summary) setWatchers("inboxCount", summary.pending + summary.unrouted)
+        return
+      }
+      if (event.type !== "issue_watcher.run.completed") return
+      void api.list().then((list) => setWatchers("authExpiredCount", list.filter(watcherAuthExpired).length)).catch(() => {})
+    })
+    onCleanup(unsub)
+  })
   function directories(project: LocalProject) {
     return [project.worktree, ...(project.sandboxes ?? [])]
   }
@@ -121,6 +152,8 @@ export function createHomeProjectsController(home: HomeController) {
       },
     },
     utility: {
+      inboxCount: () => watchers.server === home.selection.value().server ? watchers.inboxCount : 0,
+      authExpiredCount: () => watchers.server === home.selection.value().server ? watchers.authExpiredCount : 0,
       inbox: () => tabs.openUtilityTab({ type: "inbox", server: home.selection.value().server }),
       watchers: () => tabs.openUtilityTab({ type: "watchers", server: home.selection.value().server }),
       settings: openSettings,

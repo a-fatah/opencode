@@ -164,7 +164,7 @@ window.ISSUE_WATCHER_PLAN = {
       id: "wave-4",
       number: 4,
       name: "Polling and Inbox",
-      status: "planned",
+      status: "complete",
       dependsOn: ["wave-3"],
       specSlices: ["Slice 5"],
       objective: "Observe Jira safely, retain revision history, and expose a read-only triage queue.",
@@ -172,7 +172,7 @@ window.ISSUE_WATCHER_PLAN = {
       lanes: [
         {
           name: "Poll engine",
-          status: "planned",
+          status: "complete",
           work: [
             "Scoped poll fiber and process-local single-flight coalescing",
             "Opaque paginated cursors with boundary-safe ordering",
@@ -181,7 +181,7 @@ window.ISSUE_WATCHER_PLAN = {
         },
         {
           name: "Inbox API",
-          status: "planned",
+          status: "complete",
           work: [
             "Enriched InboxItem, InboxSummary, history, and ignore endpoints",
             "Auto-pause on authentication failure",
@@ -190,7 +190,7 @@ window.ISSUE_WATCHER_PLAN = {
         },
         {
           name: "Read-only triage UI",
-          status: "planned",
+          status: "complete",
           work: [
             "Inbox list, filters, counts, and failure states",
             "Watcher history plus Run-one and Run-all controls",

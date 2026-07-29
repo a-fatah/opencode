@@ -205,6 +205,16 @@ export const Run = Schema.Struct({
   error: optional(Schema.String),
 }).annotate({ identifier: "IssueWatcher.Run" })
 
+export interface Summary extends Schema.Schema.Type<typeof Summary> {}
+export const Summary = Schema.Struct({
+  watcher: Info,
+  sourceName: Schema.String,
+  sourceGlyph: Schema.String,
+  connection: optional(Schema.suspend(() => ConnectionSummary)),
+  lastRun: optional(Run),
+  recentMatchCount: NonNegativeInt,
+}).annotate({ identifier: "IssueWatcher.Summary" })
+
 export interface Ignore extends Schema.Schema.Type<typeof Ignore> {}
 export const Ignore = Schema.Struct({
   watcherID: ID,
@@ -213,6 +223,42 @@ export const Ignore = Schema.Struct({
   timeCreated: DateTimeUtcFromMillis,
   timeUpdated: DateTimeUtcFromMillis,
 }).annotate({ identifier: "IssueWatcher.Ignore" })
+
+export const HistoryEntry = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("run"), run: Run }),
+  Schema.Struct({ type: Schema.Literal("observation"), observation: Schema.suspend(() => IssueMatch.Observation) }),
+])
+  .pipe(Schema.toTaggedUnion("type"))
+  .annotate({ identifier: "IssueWatcher.HistoryEntry" })
+export type HistoryEntry = typeof HistoryEntry.Type
+
+export interface InboxItem extends Schema.Schema.Type<typeof InboxItem> {}
+export const InboxItem = Schema.Struct({
+  match: Schema.suspend(() => IssueMatch.Info),
+  sourceName: Schema.String,
+  sourceGlyph: Schema.String,
+  watcherName: Schema.String,
+  project: optional(Schema.Struct({ id: Project.ID, name: Schema.String })),
+  suggestion: optional(Schema.Struct({ id: Project.ID, name: Schema.String })),
+}).annotate({ identifier: "IssueWatcher.InboxItem" })
+
+export const PageCursor = Schema.String.pipe(Schema.brand("IssueWatcher.PageCursor"))
+export type PageCursor = typeof PageCursor.Type
+
+export const InboxFilter = Schema.Literal("attention")
+export type InboxFilter = typeof InboxFilter.Type
+
+export interface HistoryPage extends Schema.Schema.Type<typeof HistoryPage> {}
+export const HistoryPage = Schema.Struct({
+  items: Schema.Array(HistoryEntry),
+  nextCursor: optional(PageCursor),
+}).annotate({ identifier: "IssueWatcher.HistoryPage" })
+
+export interface InboxPage extends Schema.Schema.Type<typeof InboxPage> {}
+export const InboxPage = Schema.Struct({
+  items: Schema.Array(InboxItem),
+  nextCursor: optional(PageCursor),
+}).annotate({ identifier: "IssueWatcher.InboxPage" })
 
 export interface InboxSummary extends Schema.Schema.Type<typeof InboxSummary> {}
 export const InboxSummary = Schema.Struct({

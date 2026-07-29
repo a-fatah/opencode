@@ -119,4 +119,26 @@ describe("issue watcher contracts", () => {
       truncated: false,
     })
   })
+
+  test("defines tagged history and paginated inbox contracts", () => {
+    expect(
+      Schema.decodeUnknownSync(IssueWatcher.HistoryEntry)({
+        type: "run",
+        run: {
+          id: "iwr_run",
+          watcherID: "iwt_watcher",
+          startedAt: 1,
+          outcome: "ok",
+          scanned: 1,
+          matched: 1,
+          created: 0,
+          queued: 0,
+          unrouted: 1,
+          skipped: 0,
+          failed: 0,
+        },
+      }).type,
+    ).toBe("run")
+    expect(Schema.decodeUnknownSync(IssueWatcher.InboxPage)({ items: [] })).toEqual({ items: [] })
+  })
 })

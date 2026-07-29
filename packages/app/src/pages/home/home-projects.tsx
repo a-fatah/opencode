@@ -34,6 +34,7 @@ export function HomeProjects(props: { projects: HomeProjectsController; scroll: 
       onClearNotifications={props.projects.project.clearNotifications}
       onCloseProject={props.projects.project.close}
       onOpenInbox={props.projects.utility.inbox}
+      inboxCount={props.projects.utility.inboxCount}
       onOpenWatchers={props.projects.utility.watchers}
       onOpenSettings={props.projects.utility.settings}
       onOpenHelp={props.projects.utility.help}

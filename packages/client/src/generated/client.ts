@@ -13,6 +13,7 @@ import type {
   IssueWatchersUpdateSettingsInput,
   IssueWatchersUpdateSettingsOutput,
   IssueWatchersListOutput,
+  IssueWatchersRunAllOutput,
   IssueWatchersCreateInput,
   IssueWatchersCreateOutput,
   IssueWatchersGetInput,
@@ -21,6 +22,15 @@ import type {
   IssueWatchersUpdateOutput,
   IssueWatchersArchiveInput,
   IssueWatchersArchiveOutput,
+  IssueWatchersRunInput,
+  IssueWatchersRunOutput,
+  IssueWatchersHistoryInput,
+  IssueWatchersHistoryOutput,
+  IssueWatchersIgnoresInput,
+  IssueWatchersIgnoresOutput,
+  IssueWatchersInboxInput,
+  IssueWatchersInboxOutput,
+  IssueWatchersInboxSummaryOutput,
   IssueWatchersEnableInput,
   IssueWatchersEnableOutput,
   LocationGetInput,
@@ -381,6 +391,17 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ),
+      runAll: (requestOptions?: RequestOptions) =>
+        request<IssueWatchersRunAllOutput>(
+          {
+            method: "POST",
+            path: `/api/issue-watcher/watchers/run`,
+            successStatus: 200,
+            declaredStatuses: [409, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
       create: (input: IssueWatchersCreateInput, requestOptions?: RequestOptions) =>
         request<IssueWatchersCreateOutput>(
           {
@@ -441,6 +462,69 @@ export function make(options: ClientOptions) {
             successStatus: 204,
             declaredStatuses: [404, 401, 400],
             empty: true,
+          },
+          requestOptions,
+        ),
+      run: (input: IssueWatchersRunInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersRunOutput>(
+          {
+            method: "POST",
+            path: `/api/issue-watcher/watchers/${encodeURIComponent(input.watcherID)}/run`,
+            successStatus: 200,
+            declaredStatuses: [404, 409, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      history: (input: IssueWatchersHistoryInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersHistoryOutput>(
+          {
+            method: "GET",
+            path: `/api/issue-watcher/watchers/${encodeURIComponent(input.watcherID)}/history`,
+            query: { cursor: input["cursor"], limit: input["limit"] },
+            successStatus: 200,
+            declaredStatuses: [404, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      ignores: (input: IssueWatchersIgnoresInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersIgnoresOutput>(
+          {
+            method: "GET",
+            path: `/api/issue-watcher/watchers/${encodeURIComponent(input.watcherID)}/ignore`,
+            successStatus: 200,
+            declaredStatuses: [404, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      inbox: (input?: IssueWatchersInboxInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersInboxOutput>(
+          {
+            method: "GET",
+            path: `/api/issue-watcher/inbox`,
+            query: {
+              cursor: input?.["cursor"],
+              limit: input?.["limit"],
+              state: input?.["state"],
+              integrationID: input?.["integrationID"],
+              filter: input?.["filter"],
+            },
+            successStatus: 200,
+            declaredStatuses: [400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      inboxSummary: (requestOptions?: RequestOptions) =>
+        request<IssueWatchersInboxSummaryOutput>(
+          {
+            method: "GET",
+            path: `/api/issue-watcher/inbox/summary`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
           },
           requestOptions,
         ),

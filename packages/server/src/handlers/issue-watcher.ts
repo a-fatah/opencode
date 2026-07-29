@@ -1,6 +1,7 @@
 import { IssueWatcher } from "@opencode-ai/core/issue-watcher"
 import {
   InvalidRequestError,
+  InvalidCursorError,
   IssueIntegrationAuthenticationError,
   IssueIntegrationConnectionNotFoundError,
   IssueIntegrationNotFoundError,
@@ -8,6 +9,7 @@ import {
   IssueIntegrationTenantConflict,
   IssueWatcherNotFoundError,
   IssueWatcherOwnerConflict,
+  IssueWatcherRunConflict,
 } from "@opencode-ai/protocol/errors"
 import { Effect } from "effect"
 import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi"
@@ -22,6 +24,12 @@ const notFound = (watcherID: string) =>
 const ownerConflict = (detail: string) =>
   new IssueWatcherOwnerConflict({
     message: detail,
+  })
+
+const runConflict = (error: IssueWatcher.RunConflictError) =>
+  new IssueWatcherRunConflict({
+    watcherID: error.id,
+    message: error.detail,
   })
 
 const sourceError = (error: IssueWatcher.SourceNotFoundError | IssueWatcher.ConnectionNotFoundError | IssueWatcher.VerificationModeError | import("@opencode-ai/core/issue-watcher/provider").IssueProvider.Error) => {
@@ -67,6 +75,12 @@ export const IssueWatcherHandler = HttpApiBuilder.group(Api, "server.issueWatche
       .handle("issueWatcher.getSettings", () => service.settings.get())
       .handle("issueWatcher.updateSettings", (ctx) => service.settings.update(ctx.payload))
       .handle("issueWatcher.list", () => service.list())
+      .handle("issueWatcher.runAll", () => service.runAll().pipe(
+        Effect.catchTags({
+          "IssueWatcher.OwnerConflictError": (error) => ownerConflict(error.detail),
+          "IssueWatcher.RunConflictError": runConflict,
+        }),
+      ))
       .handle("issueWatcher.create", (ctx) =>
         service.create(ctx.payload).pipe(
           Effect.catchTag("IssueWatcher.OwnerConflictError", (error) => ownerConflict(error.detail)),
@@ -101,5 +115,33 @@ export const IssueWatcherHandler = HttpApiBuilder.group(Api, "server.issueWatche
           }),
         ),
       )
+      .handle("issueWatcher.run", (ctx) =>
+        service.run(ctx.params.watcherID).pipe(
+          Effect.catchTags({
+            "IssueWatcher.NotFoundError": () => notFound(ctx.params.watcherID),
+            "IssueWatcher.OwnerConflictError": (error) => ownerConflict(error.detail),
+            "IssueWatcher.RunConflictError": runConflict,
+          }),
+        ),
+      )
+      .handle("issueWatcher.history", (ctx) =>
+        service.history(ctx.params.watcherID, ctx.query).pipe(
+          Effect.catchTags({
+            "IssueWatcher.NotFoundError": () => notFound(ctx.params.watcherID),
+            "IssueWatcher.InvalidCursorError": (error) => new InvalidCursorError({ message: error.detail }),
+          }),
+        ),
+      )
+      .handle("issueWatcher.ignores", (ctx) =>
+        service.ignores(ctx.params.watcherID).pipe(
+          Effect.catchTag("IssueWatcher.NotFoundError", () => notFound(ctx.params.watcherID)),
+        ),
+      )
+      .handle("issueWatcher.inbox", (ctx) =>
+        service.inbox(ctx.query).pipe(
+          Effect.catchTag("IssueWatcher.InvalidCursorError", (error) => new InvalidCursorError({ message: error.detail })),
+        ),
+      )
+      .handle("issueWatcher.inboxSummary", () => service.summary())
   }),
 )

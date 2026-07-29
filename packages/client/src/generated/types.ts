@@ -68,6 +68,14 @@ export type IssueWatcherOwnerConflict = { readonly _tag: "IssueWatcherOwnerConfl
 export const isIssueWatcherOwnerConflict = (value: unknown): value is IssueWatcherOwnerConflict =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "IssueWatcherOwnerConflict"
 
+export type IssueWatcherRunConflict = {
+  readonly _tag: "IssueWatcherRunConflict"
+  readonly watcherID: string
+  readonly message: string
+}
+export const isIssueWatcherRunConflict = (value: unknown): value is IssueWatcherRunConflict =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "IssueWatcherRunConflict"
+
 export type IssueWatcherNotFoundError = {
   readonly _tag: "IssueWatcherNotFoundError"
   readonly watcherID: string
@@ -681,47 +689,96 @@ export type IssueWatchersUpdateSettingsOutput = {
 }
 
 export type IssueWatchersListOutput = ReadonlyArray<{
-  readonly id: string
-  readonly integrationID: string
-  readonly connectionID: string
-  readonly name: string
-  readonly enabled: boolean
-  readonly projectID?: string
-  readonly criteria: {
-    readonly issueProjects: ReadonlyArray<string>
-    readonly assignee?: "me" | { readonly id: string }
-    readonly labels?: ReadonlyArray<string>
-    readonly statuses?: ReadonlyArray<string>
-    readonly watchUpdates: boolean
-    readonly escape?: { readonly language: "jql" | "linear-filter" | "github-search"; readonly query: string }
+  readonly watcher: {
+    readonly id: string
+    readonly integrationID: string
+    readonly connectionID: string
+    readonly name: string
+    readonly enabled: boolean
+    readonly projectID?: string
+    readonly criteria: {
+      readonly issueProjects: ReadonlyArray<string>
+      readonly assignee?: "me" | { readonly id: string }
+      readonly labels?: ReadonlyArray<string>
+      readonly statuses?: ReadonlyArray<string>
+      readonly watchUpdates: boolean
+      readonly escape?: { readonly language: "jql" | "linear-filter" | "github-search"; readonly query: string }
+    }
+    readonly routing: {
+      readonly repoField?: { readonly fieldName: string }
+      readonly mappings: ReadonlyArray<{
+        readonly key: { readonly type: "label" | "component" | "issueProject"; readonly value: string }
+        readonly projectID: string
+      }>
+      readonly fallback: "inbox"
+      readonly workspace:
+        | { readonly type: "branch"; readonly pattern: string }
+        | { readonly type: "current" }
+        | { readonly type: "worktree" }
+    }
+    readonly action: {
+      readonly mode: "inbox" | "awaiting_run" | "run"
+      readonly promptTemplate: string
+      readonly writeback: {
+        readonly comment: boolean
+        readonly transitionOnStart?: string
+        readonly commentOnFailure: boolean
+      }
+    }
+    readonly cursor?: string
+    readonly lastRunAt?: number
+    readonly lastError?: string
+    readonly archivedAt?: number
+    readonly timeCreated: number
+    readonly timeUpdated: number
   }
-  readonly routing: {
-    readonly repoField?: { readonly fieldName: string }
-    readonly mappings: ReadonlyArray<{
-      readonly key: { readonly type: "label" | "component" | "issueProject"; readonly value: string }
-      readonly projectID: string
-    }>
-    readonly fallback: "inbox"
-    readonly workspace:
-      | { readonly type: "branch"; readonly pattern: string }
-      | { readonly type: "current" }
-      | { readonly type: "worktree" }
-  }
-  readonly action: {
-    readonly mode: "inbox" | "awaiting_run" | "run"
-    readonly promptTemplate: string
-    readonly writeback: {
-      readonly comment: boolean
-      readonly transitionOnStart?: string
-      readonly commentOnFailure: boolean
+  readonly sourceName: string
+  readonly sourceGlyph: string
+  readonly connection?: {
+    readonly id: string
+    readonly label: string
+    readonly tenantIdentity: string
+    readonly inputs: { readonly [x: string]: string }
+    readonly verification: {
+      readonly status: "connected" | "needs_auth" | "not_connected"
+      readonly detail: string
+      readonly checkedAt: number
     }
   }
+  readonly lastRun?: {
+    readonly id: string
+    readonly watcherID: string
+    readonly startedAt: number
+    readonly finishedAt?: number
+    readonly outcome: "ok" | "throttled" | "auth_failed" | "error"
+    readonly scanned: number
+    readonly matched: number
+    readonly created: number
+    readonly queued: number
+    readonly unrouted: number
+    readonly skipped: number
+    readonly failed: number
+    readonly cursor?: string
+    readonly error?: string
+  }
+  readonly recentMatchCount: number
+}>
+
+export type IssueWatchersRunAllOutput = ReadonlyArray<{
+  readonly id: string
+  readonly watcherID: string
+  readonly startedAt: number
+  readonly finishedAt?: number
+  readonly outcome: "ok" | "throttled" | "auth_failed" | "error"
+  readonly scanned: number
+  readonly matched: number
+  readonly created: number
+  readonly queued: number
+  readonly unrouted: number
+  readonly skipped: number
+  readonly failed: number
   readonly cursor?: string
-  readonly lastRunAt?: number
-  readonly lastError?: string
-  readonly archivedAt?: number
-  readonly timeCreated: number
-  readonly timeUpdated: number
+  readonly error?: string
 }>
 
 export type IssueWatchersCreateInput = {
@@ -1401,6 +1458,185 @@ export type IssueWatchersUpdateOutput = {
 export type IssueWatchersArchiveInput = { readonly watcherID: { readonly watcherID: string }["watcherID"] }
 
 export type IssueWatchersArchiveOutput = void
+
+export type IssueWatchersRunInput = { readonly watcherID: { readonly watcherID: string }["watcherID"] }
+
+export type IssueWatchersRunOutput = {
+  readonly id: string
+  readonly watcherID: string
+  readonly startedAt: number
+  readonly finishedAt?: number
+  readonly outcome: "ok" | "throttled" | "auth_failed" | "error"
+  readonly scanned: number
+  readonly matched: number
+  readonly created: number
+  readonly queued: number
+  readonly unrouted: number
+  readonly skipped: number
+  readonly failed: number
+  readonly cursor?: string
+  readonly error?: string
+}
+
+export type IssueWatchersHistoryInput = {
+  readonly watcherID: { readonly watcherID: string }["watcherID"]
+  readonly cursor?: { readonly cursor?: string | undefined; readonly limit?: number | undefined }["cursor"]
+  readonly limit?: { readonly cursor?: string | undefined; readonly limit?: number | undefined }["limit"]
+}
+
+export type IssueWatchersHistoryOutput = {
+  readonly items: ReadonlyArray<
+    | {
+        readonly type: "run"
+        readonly run: {
+          readonly id: string
+          readonly watcherID: string
+          readonly startedAt: number
+          readonly finishedAt?: number
+          readonly outcome: "ok" | "throttled" | "auth_failed" | "error"
+          readonly scanned: number
+          readonly matched: number
+          readonly created: number
+          readonly queued: number
+          readonly unrouted: number
+          readonly skipped: number
+          readonly failed: number
+          readonly cursor?: string
+          readonly error?: string
+        }
+      }
+    | {
+        readonly type: "observation"
+        readonly observation: {
+          readonly id: string
+          readonly matchID: string
+          readonly runID: string
+          readonly fingerprint: string
+          readonly externalUpdatedAt: number
+          readonly payload: {
+            readonly id: string
+            readonly key: string
+            readonly title: string
+            readonly description: string
+            readonly url: string
+            readonly status: string
+            readonly assignee?: { readonly id: string; readonly name: string }
+            readonly labels: ReadonlyArray<string>
+            readonly issueProject: string
+            readonly component?: string
+            readonly acceptanceCriteria?: string
+            readonly repoField?: string
+            readonly updatedAt: number
+            readonly raw: JsonValue
+          }
+          readonly timeCreated: number
+          readonly timeUpdated: number
+        }
+      }
+  >
+  readonly nextCursor?: string
+}
+
+export type IssueWatchersIgnoresInput = { readonly watcherID: { readonly watcherID: string }["watcherID"] }
+
+export type IssueWatchersIgnoresOutput = ReadonlyArray<{
+  readonly watcherID: string
+  readonly externalID: string
+  readonly reason?: string
+  readonly timeCreated: number
+  readonly timeUpdated: number
+}>
+
+export type IssueWatchersInboxInput = {
+  readonly cursor?: {
+    readonly cursor?: string | undefined
+    readonly limit?: number | undefined
+    readonly state?: "pending" | "skipped" | "dismissed" | "duplicate" | "unrouted" | undefined
+    readonly integrationID?: string | undefined
+    readonly filter?: "attention" | undefined
+  }["cursor"]
+  readonly limit?: {
+    readonly cursor?: string | undefined
+    readonly limit?: number | undefined
+    readonly state?: "pending" | "skipped" | "dismissed" | "duplicate" | "unrouted" | undefined
+    readonly integrationID?: string | undefined
+    readonly filter?: "attention" | undefined
+  }["limit"]
+  readonly state?: {
+    readonly cursor?: string | undefined
+    readonly limit?: number | undefined
+    readonly state?: "pending" | "skipped" | "dismissed" | "duplicate" | "unrouted" | undefined
+    readonly integrationID?: string | undefined
+    readonly filter?: "attention" | undefined
+  }["state"]
+  readonly integrationID?: {
+    readonly cursor?: string | undefined
+    readonly limit?: number | undefined
+    readonly state?: "pending" | "skipped" | "dismissed" | "duplicate" | "unrouted" | undefined
+    readonly integrationID?: string | undefined
+    readonly filter?: "attention" | undefined
+  }["integrationID"]
+  readonly filter?: {
+    readonly cursor?: string | undefined
+    readonly limit?: number | undefined
+    readonly state?: "pending" | "skipped" | "dismissed" | "duplicate" | "unrouted" | undefined
+    readonly integrationID?: string | undefined
+    readonly filter?: "attention" | undefined
+  }["filter"]
+}
+
+export type IssueWatchersInboxOutput = {
+  readonly items: ReadonlyArray<{
+    readonly match: {
+      readonly id: string
+      readonly watcherID: string
+      readonly integrationID: string
+      readonly connectionID: string
+      readonly externalID: string
+      readonly externalKey: string
+      readonly externalUrl: string
+      readonly fingerprint: string
+      readonly externalUpdatedAt: number
+      readonly state: "pending" | "skipped" | "dismissed" | "duplicate" | "unrouted"
+      readonly projectID?: string
+      readonly routeReason?: string
+      readonly payload: {
+        readonly id: string
+        readonly key: string
+        readonly title: string
+        readonly description: string
+        readonly url: string
+        readonly status: string
+        readonly assignee?: { readonly id: string; readonly name: string }
+        readonly labels: ReadonlyArray<string>
+        readonly issueProject: string
+        readonly component?: string
+        readonly acceptanceCriteria?: string
+        readonly repoField?: string
+        readonly updatedAt: number
+        readonly raw: JsonValue
+      }
+      readonly error?: string
+      readonly timeCreated: number
+      readonly timeUpdated: number
+    }
+    readonly sourceName: string
+    readonly sourceGlyph: string
+    readonly watcherName: string
+    readonly project?: { readonly id: string; readonly name: string }
+    readonly suggestion?: { readonly id: string; readonly name: string }
+  }>
+  readonly nextCursor?: string
+}
+
+export type IssueWatchersInboxSummaryOutput = {
+  readonly pending: number
+  readonly unrouted: number
+  readonly duplicate: number
+  readonly failedMaterializations: number
+  readonly sessionsOpenedThisWeek: number
+  readonly failedRuns: number
+}
 
 export type IssueWatchersEnableInput = {
   readonly watcherID: { readonly watcherID: string }["watcherID"]

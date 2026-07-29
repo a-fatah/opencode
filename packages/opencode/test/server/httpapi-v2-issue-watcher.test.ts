@@ -104,7 +104,14 @@ describe("v2 issue watcher HttpApi", () => {
 
     const listed = await request(route)
     expect(listed.status).toBe(200)
-    expect(await listed.json()).toEqual([createdWatcher])
+    expect(await listed.json()).toEqual([
+      {
+        watcher: createdWatcher,
+        sourceName: "Jira",
+        sourceGlyph: "jira",
+        recentMatchCount: 0,
+      },
+    ])
 
     const found = await request(`${route}/${createdWatcher.id}`)
     expect(found.status).toBe(200)
@@ -142,5 +149,52 @@ describe("v2 issue watcher HttpApi", () => {
       watcherID: missingID,
       message: `Issue watcher not found: ${missingID}`,
     })
+  })
+
+  test("exposes polling, Inbox, history, and ignore routes without location transport", async () => {
+    const created = await request("/api/issue-watcher/watchers", json("POST", input))
+    const createdWatcher: unknown = await created.json()
+    watcher(createdWatcher)
+
+    const summary = await request("/api/issue-watcher/inbox/summary")
+    expect(summary.status).toBe(200)
+    expect(await summary.json()).toEqual({
+      pending: 0,
+      unrouted: 0,
+      duplicate: 0,
+      failedMaterializations: 0,
+      sessionsOpenedThisWeek: 0,
+      failedRuns: 0,
+    })
+
+    const inbox = await request("/api/issue-watcher/inbox")
+    expect(inbox.status).toBe(200)
+    expect(await inbox.json()).toEqual({ items: [] })
+
+    const ignores = await request(`/api/issue-watcher/watchers/${createdWatcher.id}/ignore`)
+    expect(ignores.status).toBe(200)
+    expect(await ignores.json()).toEqual([])
+
+    const history = await request(`/api/issue-watcher/watchers/${createdWatcher.id}/history`)
+    expect(history.status).toBe(200)
+    expect(await history.json()).toEqual({ items: [] })
+
+    const invalidCursor = await request("/api/issue-watcher/inbox?cursor=invalid")
+    expect(invalidCursor.status).toBe(400)
+    expect(await invalidCursor.json()).toMatchObject({ _tag: "InvalidCursorError" })
+
+    const run = await request(`/api/issue-watcher/watchers/${createdWatcher.id}/run`, { method: "POST" })
+    expect(run.status).toBe(200)
+    expect(await run.json()).toMatchObject({ watcherID: createdWatcher.id, outcome: "auth_failed" })
+
+    const recorded = await request(`/api/issue-watcher/watchers/${createdWatcher.id}/history`)
+    expect(recorded.status).toBe(200)
+    expect(await recorded.json()).toMatchObject({
+      items: [{ type: "run", run: { watcherID: createdWatcher.id, outcome: "auth_failed" } }],
+    })
+
+    const all = await request("/api/issue-watcher/watchers/run", { method: "POST" })
+    expect(all.status).toBe(200)
+    expect(await all.json()).toEqual([])
   })
 })

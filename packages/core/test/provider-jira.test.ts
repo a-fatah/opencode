@@ -191,6 +191,15 @@ describe("Jira issue provider", () => {
     expect(url(http.requests[0]!).searchParams.get("expand")).toBe("names")
   })
 
+  test("preserves the starting watermark on an empty page", async () => {
+    const cursor = Buffer.from(JSON.stringify({ updatedAt: 42, externalID: "9" })).toString("base64url")
+    const result = await Effect.runPromise(
+      makeJira(fakeHttp(() => Response.json({ issues: [] })).client).search({ credential: credential(), criteria, cursor }),
+    )
+
+    expect(result.cursor).toBe(cursor)
+  })
+
   test("rejects invalid cursors and page tokens with typed pagination errors", async () => {
     const adapter = makeJira(fakeHttp(() => Response.json({ issues: [] })).client)
     const invalidCursor = await Effect.runPromise(

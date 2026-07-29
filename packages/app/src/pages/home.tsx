@@ -7,6 +7,8 @@ import { createHomeScrollController } from "./home/home-scroll-controller"
 import { createHomeSessionSearchController } from "./home/home-session-search-controller"
 import { createHomeSessionsController } from "./home/home-sessions-controller"
 import { HomeSessions } from "./home/home-sessions"
+import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
+import { Show } from "solid-js"
 
 export function NewHome() {
   const home = createHomeController()
@@ -17,12 +19,20 @@ export function NewHome() {
   return (
     <div
       class={`
-        m-2 min-h-0 flex-1 self-stretch overflow-hidden rounded-[10px]
+        m-2 flex min-h-0 flex-1 self-stretch flex-col overflow-hidden rounded-[10px]
         bg-v2-background-bg-base shadow-[var(--v2-elevation-raised)]
       `}
     >
+      <Show when={projects.utility.authExpiredCount() > 0}>
+        <section class="mx-3 mt-3 flex shrink-0 flex-col gap-3 rounded-lg border border-v2-border-border-danger bg-v2-background-bg-surface px-4 py-3 sm:flex-row sm:items-center">
+          <p class="min-w-0 flex-1 text-13-regular text-v2-text-text-danger">
+            Issue source authentication expired for {projects.utility.authExpiredCount()} watcher{projects.utility.authExpiredCount() === 1 ? "" : "s"}. Reconnect to resume polling from the saved cursor.
+          </p>
+          <ButtonV2 variant="outline" onClick={projects.utility.watchers}>Review watchers</ButtonV2>
+        </section>
+      </Show>
       <ScrollView
-        class="h-full [container-type:size]"
+        class="min-h-0 flex-1 [container-type:size]"
         thumbContainer={scroll.viewport.thumbTrack}
         thumbHoverTarget={scroll.viewport.hoverTarget}
         viewportRef={scroll.viewport.setViewport}
@@ -40,6 +50,7 @@ export function NewHome() {
           <HomeUtilityNav
             class="flex lg:hidden"
             onOpenInbox={projects.utility.inbox}
+            inboxCount={projects.utility.inboxCount}
             onOpenWatchers={projects.utility.watchers}
             onOpenSettings={projects.utility.settings}
             onOpenHelp={projects.utility.help}

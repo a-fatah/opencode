@@ -19,7 +19,7 @@ import {
 export const DialogConnectSource: Component<{
   sources: readonly IntegrationSource[]
   source?: IntegrationSource
-  onSaved: () => void
+  onSaved: () => void | Promise<void>
 }> = (props) => {
   const dialog = useDialog()
   const language = useLanguage()
@@ -106,8 +106,8 @@ export const DialogConnectSource: Component<{
         })
       : serverSdk().nextApi.issueWatchers.createConnection(request)
     await result
-      .then(() => {
-        props.onSaved()
+      .then(async () => {
+        await props.onSaved()
         dialog.close()
       })
       .catch((error: Error) => setStore("error", error.message))

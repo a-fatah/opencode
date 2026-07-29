@@ -125,6 +125,12 @@ export class IssueWatcherOwnerConflict extends Schema.TaggedErrorClass<IssueWatc
   { httpApiStatus: 409 },
 ) {}
 
+export class IssueWatcherRunConflict extends Schema.TaggedErrorClass<IssueWatcherRunConflict>()(
+  "IssueWatcherRunConflict",
+  { watcherID: Schema.String, message: Schema.String },
+  { httpApiStatus: 409 },
+) {}
+
 export class IssueIntegrationNotFoundError extends Schema.TaggedErrorClass<IssueIntegrationNotFoundError>()(
   "IssueIntegrationNotFoundError",
   { integrationID: Schema.String, message: Schema.String },

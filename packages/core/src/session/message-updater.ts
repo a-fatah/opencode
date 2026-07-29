@@ -100,6 +100,7 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
 
   return Effect.gen(function* () {
     yield* SessionEvent.All.match(event, {
+      "session.deleted": () => Effect.void,
       "session.next.agent.switched": (event) => {
         return adapter.appendMessage(
           SessionMessage.AgentSwitched.make({
@@ -390,6 +391,15 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
       "session.next.revert.staged": () => Effect.void,
       "session.next.revert.cleared": () => Effect.void,
       "session.next.revert.committed": () => Effect.void,
+      "session.next.prompt.replaced": () => Effect.void,
+      "session.next.prompt.cancelled": () => Effect.void,
+      "session.next.prompt.claimed": () => Effect.void,
+      "session.execution.scheduled": () => Effect.void,
+      "session.execution.started": () => Effect.void,
+      "session.execution.completed": () => Effect.void,
+      "session.execution.failed": () => Effect.void,
+      "session.execution.interrupted": () => Effect.void,
+      "session.execution.superseded": () => Effect.void,
     })
   })
 }

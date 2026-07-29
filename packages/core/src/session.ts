@@ -7,6 +7,7 @@ import { and, asc, desc, eq, gt, like, lt, or, type SQL } from "drizzle-orm"
 import { ProjectV2 } from "./project"
 import { WorkspaceV2 } from "./workspace"
 import { ModelV2 } from "./model"
+import { ProviderV2 } from "./provider"
 import { Location } from "./location"
 import { SessionMessage } from "./session/message"
 import { Prompt } from "./session/prompt"
@@ -37,6 +38,17 @@ import { SessionRevert } from "./session/revert"
 import { Revert } from "@opencode-ai/schema/revert"
 import { FSUtil } from "./fs-util"
 import { SessionDurable } from "@opencode-ai/schema/durable-event-manifest"
+import {
+  AttemptConflictError,
+  LifecycleConflictError,
+  NotFoundError as InputNotFoundError,
+  PendingConflictError,
+  Pending,
+  ResumeInput,
+  ResumeResult,
+  ConfirmHandoffInput,
+} from "@opencode-ai/schema/session-input"
+import { SessionExecutionAttempt } from "./session/execution-attempt"
 
 export const RevertState = Revert.State
 export type RevertState = Revert.State
@@ -114,6 +126,7 @@ export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<SessionSchema.Info[]>
   readonly create: (input: CreateInput) => Effect.Effect<SessionSchema.Info>
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info, NotFoundError>
+  readonly remove: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError>
   readonly messages: (input: {
     sessionID: SessionSchema.ID
     limit?: number
@@ -166,7 +179,25 @@ export interface Interface {
   readonly compact: (input: CompactInput) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
   readonly wait: (id: SessionSchema.ID) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
   readonly active: Effect.Effect<ReadonlySet<SessionSchema.ID>>
-  readonly resume: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError | SessionRunner.RunError>
+  readonly pendingInputs: (sessionID: SessionSchema.ID) => Effect.Effect<readonly Pending[], NotFoundError>
+  readonly replaceInput: (input: {
+    sessionID: SessionSchema.ID
+    messageID: SessionMessage.ID
+    prompt: PromptInput.Prompt
+  }) => Effect.Effect<SessionInput.Admitted, NotFoundError | InputNotFoundError | LifecycleConflictError>
+  readonly cancelInput: (input: {
+    sessionID: SessionSchema.ID
+    messageID: SessionMessage.ID
+  }) => Effect.Effect<void, NotFoundError | InputNotFoundError | LifecycleConflictError>
+  readonly resume: (
+    input: SessionSchema.ID | (ResumeInput & { sessionID: SessionSchema.ID }),
+  ) => Effect.Effect<
+    void | ResumeResult,
+    NotFoundError | InputNotFoundError | PendingConflictError | AttemptConflictError | SessionRunner.RunError
+  >
+  readonly confirmHandoff: (
+    input: ConfirmHandoffInput & { sessionID: SessionSchema.ID },
+  ) => Effect.Effect<ResumeResult, NotFoundError | AttemptConflictError>
   readonly interrupt: (sessionID: SessionSchema.ID) => Effect.Effect<void>
   readonly revert: {
     readonly stage: (input: {
@@ -203,6 +234,9 @@ const layer = Layer.effect(
             }),
         ),
       )
+    const enrich = Effect.fn("V2Session.enrich")(function* (sessions: ReadonlyArray<SessionSchema.Info>) {
+      return yield* store.enrich(sessions, yield* execution.active, execution.ownerEpoch)
+    })
 
     const result = Service.of({
       create: Effect.fn("V2Session.create")(function* (input) {
@@ -263,7 +297,67 @@ const layer = Layer.effect(
       get: Effect.fn("V2Session.get")(function* (sessionID) {
         const session = yield* store.get(sessionID)
         if (!session) return yield* new NotFoundError({ sessionID })
-        return session
+        return (yield* enrich([session]))[0]!
+      }),
+      remove: Effect.fn("V2Session.remove")(function* (sessionID) {
+        yield* result.get(sessionID)
+        const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie)
+        if (!row) return yield* new NotFoundError({ sessionID })
+        yield* events.publish(SessionEvent.Deleted, {
+          sessionID,
+          info: SessionV1.SessionInfo.make({
+            id: row.id,
+            slug: row.slug,
+            projectID: row.project_id,
+            workspaceID: row.workspace_id ?? undefined,
+            directory: row.directory,
+            path: row.path ?? undefined,
+            parentID: row.parent_id ?? undefined,
+            title: row.title,
+            agent: row.agent ?? undefined,
+            model: row.model
+              ? {
+                  id: ModelV2.ID.make(row.model.id),
+                  providerID: ProviderV2.ID.make(row.model.providerID),
+                  variant: row.model.variant,
+                }
+              : undefined,
+            version: row.version,
+            summary:
+              row.summary_additions !== null || row.summary_deletions !== null || row.summary_files !== null
+                ? {
+                    additions: row.summary_additions ?? 0,
+                    deletions: row.summary_deletions ?? 0,
+                    files: row.summary_files ?? 0,
+                    diffs: row.summary_diffs ?? undefined,
+                  }
+                : undefined,
+            cost: row.cost,
+            tokens: {
+              input: row.tokens_input,
+              output: row.tokens_output,
+              reasoning: row.tokens_reasoning,
+              cache: { read: row.tokens_cache_read, write: row.tokens_cache_write },
+            },
+            share: row.share_url ? { url: row.share_url } : undefined,
+            metadata: row.metadata ?? undefined,
+            revert: row.revert
+              ? {
+                  messageID: SessionV1.MessageID.make(row.revert.messageID),
+                  partID: row.revert.partID ? SessionV1.PartID.make(row.revert.partID) : undefined,
+                  snapshot: row.revert.snapshot,
+                  diff: row.revert.diff,
+                }
+              : undefined,
+            permission: row.permission ?? undefined,
+            time: {
+              created: row.time_created,
+              updated: row.time_updated,
+              compacting: row.time_compacting ?? undefined,
+              archived: row.time_archived ?? undefined,
+            },
+          }),
+        })
       }),
       list: Effect.fn("V2Session.list")(function* (input = {}) {
         const direction = input.anchor?.direction ?? "next"
@@ -299,7 +393,7 @@ const layer = Layer.effect(
         const rows = yield* (input.limit === undefined ? query.all() : query.limit(input.limit).all()).pipe(
           Effect.orDie,
         )
-        return (direction === "previous" ? rows.toReversed() : rows).map((row) => fromRow(row))
+        return yield* enrich((direction === "previous" ? rows.toReversed() : rows).map((row) => fromRow(row)))
       }),
       messages: Effect.fn("V2Session.messages")(function* (input) {
         yield* result.get(input.sessionID)
@@ -423,9 +517,219 @@ const layer = Layer.effect(
         return yield* new OperationUnavailableError({ operation: "wait" })
       }),
       active: execution.active,
-      resume: Effect.fn("V2Session.resume")(function* (sessionID) {
+      pendingInputs: Effect.fn("V2Session.pendingInputs")(function* (sessionID) {
         yield* result.get(sessionID)
-        yield* execution.resume(sessionID)
+        return yield* SessionInput.pending(db, sessionID)
+      }),
+      replaceInput: Effect.fn("V2Session.replaceInput")(function* (input) {
+        yield* result.get(input.sessionID)
+        const replaced = yield* SessionInput.replace(db, events, {
+          ...input,
+          prompt: resolvePrompt(input.prompt),
+        }).pipe(
+          Effect.catchDefect((defect) =>
+            defect instanceof SessionInput.LifecycleConflict
+              ? new LifecycleConflictError({ sessionID: input.sessionID, messageID: input.messageID, state: defect.state })
+              : Effect.die(defect),
+          ),
+        )
+        if (!replaced) return yield* new InputNotFoundError(input)
+        return replaced
+      }),
+      cancelInput: Effect.fn("V2Session.cancelInput")(function* (input) {
+        yield* result.get(input.sessionID)
+        const cancelled = yield* SessionInput.cancel(db, events, input.sessionID, input.messageID).pipe(
+          Effect.catchDefect((defect) =>
+            defect instanceof SessionInput.LifecycleConflict
+              ? new LifecycleConflictError({ sessionID: input.sessionID, messageID: input.messageID, state: defect.state })
+              : Effect.die(defect),
+          ),
+        )
+        if (!cancelled) return yield* new InputNotFoundError(input)
+      }),
+      resume: Effect.fn("V2Session.resume")(function* (input: SessionSchema.ID | (ResumeInput & { sessionID: SessionSchema.ID })) {
+        if (typeof input === "string") {
+          yield* result.get(input)
+          return yield* execution.resume(input)
+        }
+        yield* result.get(input.sessionID)
+        const stored = yield* SessionInput.find(db, input.expectedMessageID)
+        if (!stored || stored.sessionID !== input.sessionID)
+          return yield* new InputNotFoundError({ sessionID: input.sessionID, messageID: input.expectedMessageID })
+        if (stored.claimedAttemptID) {
+          if (!input.attemptID || input.attemptID !== stored.claimedAttemptID)
+            return yield* new AttemptConflictError({
+              sessionID: input.sessionID,
+              messageID: input.expectedMessageID,
+              attemptID: stored.claimedAttemptID,
+            })
+          const attempt = yield* SessionExecutionAttempt.find(db, stored.claimedAttemptID)
+          if (attempt?.status === "scheduled" && attempt.ownerEpoch === execution.ownerEpoch) yield* execution.schedule(attempt)
+          return ResumeResult.make({ attemptID: stored.claimedAttemptID })
+        }
+        const pending = yield* SessionInput.pending(db, input.sessionID)
+        if (pending.length !== 1 || pending[0]?.id !== input.expectedMessageID)
+          return yield* new PendingConflictError({
+            sessionID: input.sessionID,
+            expectedMessageID: input.expectedMessageID,
+            pendingMessageIDs: pending.map((item) => item.id),
+          })
+        const attemptID = input.attemptID ?? SessionExecutionAttempt.ID.create()
+        const timestamp = yield* DateTime.now
+        yield* Effect.uninterruptible(
+          events
+            .publishBatch([
+              {
+                definition: SessionEvent.PromptClaimed,
+                data: {
+                  sessionID: input.sessionID,
+                  messageID: input.expectedMessageID,
+                  attemptID,
+                  ownerEpoch: execution.ownerEpoch,
+                  timestamp,
+                },
+                options: { validate: SessionInput.validateOnlyPending(db, input.sessionID, input.expectedMessageID) },
+              },
+              {
+                definition: SessionEvent.Execution.Scheduled,
+                data: {
+                  sessionID: input.sessionID,
+                  messageID: input.expectedMessageID,
+                  attemptID,
+                  ownerEpoch: execution.ownerEpoch,
+                  timestamp,
+                },
+              },
+            ])
+            .pipe(
+              Effect.catchDefect((defect): Effect.Effect<void, AttemptConflictError | PendingConflictError> => {
+                if (defect instanceof SessionInput.PendingConflict)
+                  return SessionInput.find(db, input.expectedMessageID).pipe(
+                    Effect.flatMap((claimed): Effect.Effect<void, AttemptConflictError | PendingConflictError> => {
+                      if (claimed?.claimedAttemptID === attemptID) return Effect.void
+                      if (claimed?.claimedAttemptID)
+                        return Effect.fail(
+                          new AttemptConflictError({
+                            sessionID: input.sessionID,
+                            messageID: input.expectedMessageID,
+                            attemptID: claimed.claimedAttemptID,
+                          }),
+                        )
+                      return Effect.fail(
+                        new PendingConflictError({
+                          sessionID: input.sessionID,
+                          expectedMessageID: input.expectedMessageID,
+                          pendingMessageIDs: defect.pendingMessageIDs,
+                        }),
+                      )
+                    }),
+                  )
+                return SessionInput.find(db, input.expectedMessageID).pipe(
+                  Effect.flatMap((claimed) => {
+                    if (claimed?.claimedAttemptID === attemptID) return Effect.void
+                    if (claimed?.claimedAttemptID)
+                      return new AttemptConflictError({
+                        sessionID: input.sessionID,
+                        messageID: input.expectedMessageID,
+                        attemptID: claimed.claimedAttemptID,
+                      })
+                    return Effect.die(defect)
+                  }),
+                )
+              }),
+              Effect.andThen(
+                execution.schedule(
+                  SessionExecutionAttempt.Info.make({
+                    id: attemptID,
+                    sessionID: input.sessionID,
+                    messageID: input.expectedMessageID,
+                    ownerEpoch: execution.ownerEpoch,
+                    status: "scheduled",
+                    timeScheduled: timestamp,
+                  }),
+                ),
+              ),
+            ),
+        )
+        return ResumeResult.make({ attemptID })
+      }),
+      confirmHandoff: Effect.fn("V2Session.confirmHandoff")(function* (input) {
+        yield* result.get(input.sessionID)
+        const old = yield* SessionExecutionAttempt.find(db, input.attemptID)
+        if (old?.status === "superseded" && (yield* SessionExecutionAttempt.supersededBy(db, old.id)) === input.newAttemptID) {
+          const next = yield* SessionExecutionAttempt.find(db, input.newAttemptID)
+          if (next?.sessionID === input.sessionID && next.messageID === old.messageID)
+            return ResumeResult.make({ attemptID: next.id })
+        }
+        if (!old || old.sessionID !== input.sessionID || old.status !== "handoff_unknown")
+          return yield* new AttemptConflictError({
+            sessionID: input.sessionID,
+            messageID: old?.messageID ?? SessionMessage.ID.make("msg_unknown"),
+            attemptID: input.attemptID,
+          })
+        const existing = yield* SessionExecutionAttempt.find(db, input.newAttemptID)
+        if (existing) {
+          return yield* new AttemptConflictError({
+            sessionID: input.sessionID,
+            messageID: old.messageID,
+            attemptID: input.newAttemptID,
+          })
+        }
+        const timestamp = yield* DateTime.now
+        const next = SessionExecutionAttempt.Info.make({
+          id: input.newAttemptID,
+          sessionID: input.sessionID,
+          messageID: old.messageID,
+          ownerEpoch: execution.ownerEpoch,
+          status: "scheduled",
+          timeScheduled: timestamp,
+        })
+        yield* Effect.uninterruptible(
+          events.publishBatch([
+            {
+              definition: SessionEvent.Execution.Superseded,
+              data: {
+                sessionID: input.sessionID,
+                messageID: old.messageID,
+                attemptID: old.id,
+                ownerEpoch: old.ownerEpoch,
+                supersededByAttemptID: input.newAttemptID,
+                timestamp,
+              },
+            },
+            {
+              definition: SessionEvent.Execution.Scheduled,
+              data: {
+                sessionID: input.sessionID,
+                messageID: old.messageID,
+                attemptID: input.newAttemptID,
+                ownerEpoch: execution.ownerEpoch,
+                timestamp,
+              },
+            },
+          ]).pipe(
+            Effect.catchDefect((defect) =>
+              Effect.all([
+                SessionExecutionAttempt.supersededBy(db, old.id),
+                SessionExecutionAttempt.find(db, input.newAttemptID),
+              ]).pipe(
+                Effect.flatMap(([supersededBy, next]) =>
+                  supersededBy === input.newAttemptID &&
+                  next?.sessionID === input.sessionID &&
+                  next.messageID === old.messageID
+                    ? Effect.void
+                    : new AttemptConflictError({
+                        sessionID: input.sessionID,
+                        messageID: old.messageID,
+                        attemptID: input.attemptID,
+                      }),
+                ),
+              ),
+            ),
+            Effect.andThen(execution.schedule(next)),
+          ),
+        )
+        return ResumeResult.make({ attemptID: next.id })
       }),
       interrupt: Effect.fn("V2Session.interrupt")((sessionID) =>
         Effect.uninterruptible(execution.interrupt(sessionID)),

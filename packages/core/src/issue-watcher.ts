@@ -24,6 +24,7 @@ import { Integration } from "@opencode-ai/schema/integration"
 import { Issue } from "@opencode-ai/schema/issue"
 import { Repository } from "./repository"
 import { ProjectRoutingCatalog } from "./project/routing-catalog"
+import { WorkspaceProvisioner } from "./workspace-provisioner"
 import { Hash } from "./util/hash"
 
 export const ID = IssueWatcher.ID
@@ -1033,5 +1034,5 @@ const layer = Layer.effect(
 export const node = makeGlobalNode({
   service: Service,
   layer,
-  deps: [Database.node, EventV2.node, GlobalConfig.node, Credential.node, IssueProvider.node, IssueWatcherOwner.node, ProjectRoutingCatalog.node],
+  deps: [Database.node, EventV2.node, GlobalConfig.node, Credential.node, IssueProvider.node, IssueWatcherOwner.node, ProjectRoutingCatalog.node, WorkspaceProvisioner.node],
 })

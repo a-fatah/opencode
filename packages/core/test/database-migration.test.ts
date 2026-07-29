@@ -24,6 +24,9 @@ import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionSchema } from "@opencode-ai/core/session/schema"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import sessionMetadataMigration from "@opencode-ai/core/database/migration/20260511173437_session-metadata"
+import workspaceProvisionerMigration from "@opencode-ai/core/database/migration/20260729205734_workspace_provisioner"
+import workspaceProvisionerSafetyMigration from "@opencode-ai/core/database/migration/20260729211734_workspace_provisioner_safety"
+import workspaceProvisionerRecoveryMigration from "@opencode-ai/core/database/migration/20260730090000_workspace_provisioner_recovery"
 import type { SqlClient as SqlClientService } from "effect/unstable/sql/SqlClient"
 import { Database } from "@opencode-ai/core/database/database"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
@@ -38,6 +41,53 @@ const run = <A, E>(effect: Effect.Effect<A, E, SqlClientService>) =>
 const makeDb = EffectDrizzleSqlite.makeWithDefaults()
 
 describe("DatabaseMigration", () => {
+  test("preserves interrupted setup across the full sequential workspace provisioner upgrade", async () => {
+    await run(
+      Effect.gen(function* () {
+        const db = yield* makeDb
+        yield* DatabaseMigration.applyOnly(db, [workspaceProvisionerMigration])
+        yield* db.run(sql`
+          INSERT INTO workspace_provisioner_lease
+            (id, owner_id, project_id, directory, lease, state, setup_completed, time_created, time_updated)
+          VALUES
+            ('running', 'owner', 'project', '/running', '{}', 'provisioning', 'running', 1, 1),
+            ('legacy-complete', 'owner', 'project', '/complete', '{}', 'ready', 'legacy-marker', 1, 1)
+        `)
+
+        yield* DatabaseMigration.applyOnly(db, [
+          workspaceProvisionerMigration,
+          workspaceProvisionerSafetyMigration,
+          workspaceProvisionerRecoveryMigration,
+        ])
+
+        expect(yield* db.all(sql`SELECT id, setup_completed FROM workspace_provisioner_lease ORDER BY id`)).toEqual([
+          { id: "legacy-complete", setup_completed: "completed" },
+          { id: "running", setup_completed: "ambiguous" },
+        ])
+      }),
+    )
+  })
+
+  test("marks interrupted workspace setup as ambiguous", async () => {
+    await run(
+      Effect.gen(function* () {
+        const db = yield* makeDb
+        yield* db.run(sql`
+          CREATE TABLE workspace_provisioner_lease (
+            id text PRIMARY KEY,
+            setup_completed text
+          )
+        `)
+        yield* db.run(sql`INSERT INTO workspace_provisioner_lease (id, setup_completed) VALUES ('running', 'running'), ('pending', 'pending'), ('done', 'completed')`)
+        yield* DatabaseMigration.applyOnly(db, [workspaceProvisionerRecoveryMigration])
+        expect(yield* db.all(sql`SELECT id, setup_completed FROM workspace_provisioner_lease ORDER BY id`)).toEqual([
+          { id: "done", setup_completed: "completed" },
+          { id: "pending", setup_completed: "pending" },
+          { id: "running", setup_completed: "ambiguous" },
+        ])
+      }),
+    )
+  })
   test("serializes concurrent embedded initialization for one database path", async () => {
     await using tmp = await tmpdir()
     const filename = path.join(tmp.path, "embedded.sqlite")

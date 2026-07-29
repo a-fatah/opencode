@@ -1,4 +1,11 @@
-import { ToolOutput, type LLMEvent, type ProviderMetadata, type ToolResultValue, type Usage } from "@opencode-ai/llm"
+import {
+  ToolOutput,
+  type LLMEvent,
+  type ProviderErrorEvent,
+  type ProviderMetadata,
+  type ToolResultValue,
+  type Usage,
+} from "@opencode-ai/llm"
 import { DateTime, Effect } from "effect"
 import { EventV2 } from "../../event"
 import { ModelV2 } from "../../model"
@@ -70,6 +77,7 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
   let assistantFailed = false
   let providerFailed = false
   let stepSettlement: { readonly finish: string; readonly tokens: ReturnType<typeof tokens> } | undefined
+  let providerFailure: ProviderErrorEvent | undefined
 
   const startAssistant = Effect.fnUntraced(function* () {
     if (assistantMessageID !== undefined) return assistantMessageID
@@ -403,6 +411,7 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
         return
       case "provider-error":
         providerFailed = true
+        providerFailure = event
         yield* failAssistant(event.message)
         return
     }
@@ -416,6 +425,7 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
     hasActiveAssistant: () => assistantActive,
     hasAssistantStarted: () => assistantMessageID !== undefined,
     hasProviderError: () => providerFailed,
+    providerFailure: () => providerFailure,
     stepSettlement: () => stepSettlement,
     startAssistant,
     assistantMessageID: assistantMessageIDForTool,

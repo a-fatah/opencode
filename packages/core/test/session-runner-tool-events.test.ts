@@ -26,6 +26,7 @@ const capture = () => {
         })
         return event
       }),
+    publishBatch: () => Effect.die("not implemented"),
     subscribe: () => Stream.empty,
     all: () => Stream.empty,
     durable: () => Stream.empty,

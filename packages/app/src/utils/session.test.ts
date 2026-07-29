@@ -13,6 +13,7 @@ describe("normalizeSessionInfo", () => {
       tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
       time: { created: 1, updated: 1 },
       title: "New session",
+      status: "awaiting_run",
       location: { directory: "/repo/worktree", workspaceID: "workspace-1" },
       subpath: "worktree",
       revert: { messageID: "message-1", partID: "part-1", snapshot: "snapshot", files: [] },
@@ -32,6 +33,7 @@ describe("normalizeSessionInfo", () => {
       agent: "build",
       model: { id: "gpt-5", providerID: "openai", variant: "high" },
       version: "",
+      status: "awaiting_run",
       time: { created: 1, updated: 1 },
       revert: { messageID: "message-1", partID: "part-1", snapshot: "snapshot" },
     })

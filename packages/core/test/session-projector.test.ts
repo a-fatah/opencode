@@ -44,6 +44,41 @@ const assistantRow = (
 }
 
 describe("SessionProjector", () => {
+  it.effect("replays the canonical deletion event", () =>
+    Effect.gen(function* () {
+      const { db } = yield* Database.Service
+      const events = yield* EventV2.Service
+      const sessionID = SessionV2.ID.make("ses_deleted_replay")
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
+        .onConflictDoNothing()
+        .run()
+      yield* db.insert(SessionTable).values({
+        id: sessionID,
+        project_id: Project.ID.global,
+        slug: "deleted",
+        directory: "/project",
+        title: "deleted",
+        version: "test",
+      }).run()
+
+      yield* events.publish(SessionEvent.Deleted, {
+        sessionID,
+        info: {
+          id: sessionID,
+          slug: "deleted",
+          projectID: Project.ID.global,
+          directory: "/project",
+          title: "deleted",
+          version: "test",
+          time: { created: 0, updated: 0 },
+        },
+      })
+
+      expect(yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get()).toBeUndefined()
+    }),
+  )
   it.effect("projects staged, cleared, and committed reverts", () =>
     Effect.gen(function* () {
       const db = (yield* Database.Service).db

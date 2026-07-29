@@ -31,6 +31,7 @@ import { SessionMessage } from "@opencode-ai/core/session/message"
 import { Prompt } from "@opencode-ai/core/session/prompt"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
+import { SessionExecutionAttempt } from "@opencode-ai/core/session/execution-attempt"
 import { SessionRunCoordinator } from "@opencode-ai/core/session/run-coordinator"
 import { SessionRunner } from "@opencode-ai/core/session/runner"
 import * as SessionRunnerLLM from "@opencode-ai/core/session/runner/llm"
@@ -245,8 +246,10 @@ const execution = Layer.effect(
     })
     return SessionExecution.Service.of({
       active: coordinator.active,
+      ownerEpoch: "test",
       resume: coordinator.run,
       wake: coordinator.wake,
+      schedule: () => Effect.void,
       interrupt: coordinator.interrupt,
     })
   }),
@@ -555,6 +558,47 @@ const verifyPartialFlushOnInterruption = (kind: FragmentKind) =>
   })
 
 describe("SessionRunnerLLM", () => {
+  it.effect("promotes only the claimed input for a one-shot run", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const { db } = yield* Database.Service
+      const events = yield* EventV2.Service
+      const session = yield* SessionV2.Service
+      const claimed = yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Claimed" }),
+        resume: false,
+      })
+      const other = yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Other" }),
+        resume: false,
+      })
+      const attemptID = SessionExecutionAttempt.ID.create()
+      const timestamp = yield* DateTime.now
+      yield* events.publishBatch([
+        {
+          definition: SessionEvent.PromptClaimed,
+          data: { sessionID, messageID: claimed.id, attemptID, ownerEpoch: "test", timestamp },
+        },
+        {
+          definition: SessionEvent.Execution.Scheduled,
+          data: { sessionID, messageID: claimed.id, attemptID, ownerEpoch: "test", timestamp },
+        },
+      ])
+      responseStream = Stream.fromIterable(fragmentFixture("text", "one-shot", ["Done"]).completeEvents)
+
+      yield* (yield* SessionRunner.Service).run({ sessionID, force: true, claimedMessageID: claimed.id })
+
+      expect((yield* session.context(sessionID)).filter((message) => message.type === "user")).toMatchObject([
+        { type: "user", text: "Claimed" },
+      ])
+      expect(yield* SessionInput.find(db, claimed.id)).toHaveProperty("promotedSeq")
+      expect(yield* SessionInput.find(db, other.id)).not.toHaveProperty("promotedSeq")
+      requests.length = 0
+    }),
+  )
+
   it.effect("advertises and executes a globally attached application tool", () =>
     Effect.gen(function* () {
       yield* setup

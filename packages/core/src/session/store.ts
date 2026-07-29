@@ -1,6 +1,6 @@
 export * as SessionStore from "./store"
 
-import { eq } from "drizzle-orm"
+import { and, eq, inArray, isNull, ne, or } from "drizzle-orm"
 import { Context, Effect, Layer, Schema } from "effect"
 import { Database } from "../database/database"
 import { makeGlobalNode } from "../effect/app-node"
@@ -8,11 +8,16 @@ import { SessionHistory } from "./history"
 import { MessageDecodeError } from "./error"
 import { SessionMessage } from "./message"
 import { SessionSchema } from "./schema"
-import { SessionMessageTable, SessionTable } from "./sql"
+import { SessionExecutionAttemptTable, SessionInputTable, SessionMessageTable, SessionTable } from "./sql"
 import { fromRow } from "./info"
 
 export interface Interface {
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info | undefined>
+  readonly enrich: (
+    sessions: ReadonlyArray<SessionSchema.Info>,
+    active: ReadonlySet<SessionSchema.ID>,
+    ownerEpoch: string,
+  ) => Effect.Effect<SessionSchema.Info[]>
   readonly context: (sessionID: SessionSchema.ID) => Effect.Effect<SessionMessage.Message[], MessageDecodeError>
   readonly runnerContext: (
     sessionID: SessionSchema.ID,
@@ -35,6 +40,52 @@ const layer = Layer.effect(
       get: Effect.fn("SessionStore.get")(function* (sessionID) {
         const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie)
         return row ? fromRow(row) : undefined
+      }),
+      enrich: Effect.fn("SessionStore.enrich")(function* (sessions, active, ownerEpoch) {
+        if (sessions.length === 0) return []
+        const ids = sessions.map((session) => session.id)
+        const pending = yield* db
+          .select({ sessionID: SessionInputTable.session_id })
+          .from(SessionInputTable)
+          .where(
+            and(
+              inArray(SessionInputTable.session_id, ids),
+              isNull(SessionInputTable.promoted_seq),
+              isNull(SessionInputTable.cancelled_at),
+              isNull(SessionInputTable.claimed_attempt_id),
+            ),
+          )
+          .all()
+          .pipe(Effect.orDie)
+        const unknown = yield* db
+          .select({ sessionID: SessionExecutionAttemptTable.session_id })
+          .from(SessionExecutionAttemptTable)
+          .where(
+            and(
+              inArray(SessionExecutionAttemptTable.session_id, ids),
+              or(
+                eq(SessionExecutionAttemptTable.status, "handoff_unknown"),
+                and(
+                  inArray(SessionExecutionAttemptTable.status, ["scheduled", "running"]),
+                  ne(SessionExecutionAttemptTable.owner_epoch, ownerEpoch),
+                ),
+              ),
+            ),
+          )
+          .all()
+          .pipe(Effect.orDie)
+        const pendingIDs = new Set(pending.map((row) => row.sessionID))
+        const unknownIDs = new Set(unknown.map((row) => row.sessionID))
+        return sessions.map((session) => ({
+          ...session,
+          status: active.has(session.id)
+            ? "running"
+            : unknownIDs.has(session.id)
+              ? "handoff_unknown"
+              : pendingIDs.has(session.id)
+                ? "awaiting_run"
+                : "idle",
+        }))
       }),
       context: Effect.fn("SessionStore.context")(function* (sessionID) {
         return yield* SessionHistory.load(db, sessionID)

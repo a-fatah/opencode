@@ -9,6 +9,7 @@ import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { Project } from "@opencode-ai/schema/project"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Effect } from "effect"
+import fs from "fs/promises"
 import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
 
@@ -47,6 +48,46 @@ describe("ProjectRoutingCatalog", () => {
             ],
           }])
           expect(path.isAbsolute(tmp.path)).toBe(true)
+        }),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
+  it.live("resolves Git and non-Git routing selections for provisioning", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(tmpdir),
+      (tmp) =>
+        Effect.gen(function* () {
+          const gitDirectory = AbsolutePath.make(path.join(tmp.path, "git"))
+          const plainDirectory = AbsolutePath.make(path.join(tmp.path, "plain"))
+          yield* Effect.promise(async () => {
+            await fs.mkdir(gitDirectory)
+            await fs.mkdir(plainDirectory)
+            await $`git init`.cwd(gitDirectory).quiet()
+            await $`git config commit.gpgsign false`.cwd(gitDirectory).quiet()
+            await $`git config user.email test@opencode.test`.cwd(gitDirectory).quiet()
+            await $`git config user.name Test`.cwd(gitDirectory).quiet()
+            await Bun.write(path.join(gitDirectory, "README.md"), "ready\n")
+            await $`git add .`.cwd(gitDirectory).quiet()
+            await $`git commit -m root`.cwd(gitDirectory).quiet()
+          })
+          const gitID = Project.ID.make("routing-git")
+          const plainID = Project.ID.make("routing-plain")
+          yield* Database.Service.use(({ db }) =>
+            db.insert(ProjectTable).values([
+              { id: gitID, worktree: gitDirectory, vcs: "git", sandboxes: [] },
+              { id: plainID, worktree: plainDirectory, sandboxes: [] },
+            ]).run().pipe(Effect.orDie),
+          )
+          const catalog = yield* ProjectRoutingCatalog.Service
+          const git = yield* catalog.resolve(gitID)
+          expect(git.id).toBe(gitID)
+          expect(git.directory).toBe(gitDirectory)
+          expect(git.vcs).toBe("git")
+          expect(git.sourceCommonDirectory).toBeDefined()
+          expect(git.baseRevision).toMatch(/^[0-9a-f]{40}$/)
+          expect(git.sourceBranch).toBeDefined()
+          expect(yield* catalog.resolve(plainID)).toEqual({ id: plainID, directory: plainDirectory })
         }),
       (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
     ),

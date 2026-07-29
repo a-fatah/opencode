@@ -2,6 +2,7 @@ import type { Event, Session, SessionV2Info, V2SessionListResponse } from "@open
 import type { QueryClient } from "@tanstack/solid-query"
 import { trimSessions } from "./session-trim"
 import { pathKey } from "@/utils/path-key"
+import { sessionStatus, type AppSession } from "@/utils/session"
 
 export const HOME_V2_SESSION_PAGE_LIMIT = 5_000
 
@@ -73,11 +74,27 @@ export function homeSessionIndexSessions(index: HomeSessionIndex | undefined, ev
     .reduce((sessions, entry) => applyHomeSessionEvent(sessions, entry.event), index.sessions)
 }
 
-export function homeSessionIndexRefresh(event: Event["type"], connected: boolean) {
+const SESSION_LIFECYCLE_EVENTS = new Set([
+  "session.next.prompt.admitted",
+  "session.next.prompt.replaced",
+  "session.next.prompt.cancelled",
+  "session.next.prompt.claimed",
+  "session.input.admitted",
+  "session.input.promoted",
+  "session.execution.scheduled",
+  "session.execution.started",
+  "session.execution.completed",
+  "session.execution.succeeded",
+  "session.execution.failed",
+  "session.execution.interrupted",
+  "session.execution.superseded",
+])
+
+export function homeSessionIndexRefresh(event: Event["type"] | string, connected: boolean) {
   if (event === "server.connected") return { connected: true, refetch: connected }
   return {
     connected,
-    refetch: event === "global.disposed" || event === "session.next.moved",
+    refetch: event === "global.disposed" || event === "session.next.moved" || SESSION_LIFECYCLE_EVENTS.has(event),
   }
 }
 
@@ -116,7 +133,7 @@ export function createHomeSessionIndexCache(queryClient: QueryClient, server: st
       }
       queryClient.setQueryData<HomeSessionEvents>(eventsKey, { sequence: next.sequence, entries: [] })
     },
-    refresh(event: Event["type"]) {
+    refresh(event: Event["type"] | string) {
       const result = homeSessionIndexRefresh(event, connected)
       connected = result.connected
       if (!result.refetch) return
@@ -154,7 +171,7 @@ export function applyHomeSessionEvent(sessions: Session[], event: HomeSessionEve
   return sessions.with(index, info)
 }
 
-function toLegacySummary(session: SessionV2Info): Session {
+function toLegacySummary(session: SessionV2Info): AppSession {
   return {
     id: session.id,
     slug: session.id,
@@ -169,6 +186,7 @@ function toLegacySummary(session: SessionV2Info): Session {
     agent: session.agent,
     model: session.model,
     version: "",
+    status: sessionStatus(session),
     time: session.time,
   }
 }

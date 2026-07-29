@@ -1,9 +1,10 @@
 import { describe, expect } from "bun:test"
 import path from "path"
-import { Effect, Layer, Stream } from "effect"
+import { DateTime, Effect, Layer, Stream } from "effect"
 import { AgentV2 } from "@opencode-ai/core/agent"
 import { asc, eq } from "drizzle-orm"
 import { Database } from "@opencode-ai/core/database/database"
+import { SessionDurable } from "@opencode-ai/schema/durable-event-manifest"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { EventV2 } from "@opencode-ai/core/event"
@@ -20,7 +21,9 @@ import { Prompt } from "@opencode-ai/core/session/prompt"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionInput } from "@opencode-ai/core/session/input"
+import { SessionExecutionAttempt } from "@opencode-ai/core/session/execution-attempt"
 import { SessionEvent } from "@opencode-ai/core/session/event"
+import { SessionMessage } from "@opencode-ai/core/session/message"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { WorkspaceV2 } from "@opencode-ai/core/workspace"
@@ -48,6 +51,34 @@ const location = Location.Ref.make({ directory: AbsolutePath.make("/project") })
 const id = SessionV2.ID.create()
 
 describe("SessionV2.create", () => {
+  it.effect("deletes through one durable canonical event without erasing history", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionV2.Service
+      const db = (yield* Database.Service).db
+      const created = yield* session.create({ location })
+
+      yield* session.remove(created.id)
+
+      expect(yield* session.get(created.id).pipe(Effect.flip)).toBeInstanceOf(SessionV2.NotFoundError)
+      expect(
+        (yield* db
+          .select()
+          .from(EventTable)
+          .where(eq(EventTable.aggregate_id, created.id))
+          .orderBy(asc(EventTable.seq))
+          .all()).map((event) => [event.seq, event.type]),
+      ).toEqual([
+        [0, EventV2.versionedType(SessionV1.Event.Created.type, 1)],
+        [1, EventV2.versionedType(SessionEvent.Deleted.type, 1)],
+      ])
+      expect(
+        (yield* EventV2.readAggregate(db, { aggregateID: created.id, limit: 10, manifest: SessionDurable })).events.map(
+          (event) => event.type,
+        ),
+      ).toEqual([SessionEvent.Deleted.type])
+    }),
+  )
+
   it.effect("creates a fresh projected session when the ID is omitted", () =>
     Effect.gen(function* () {
       const session = yield* SessionV2.Service
@@ -290,6 +321,105 @@ describe("SessionV2.create", () => {
           [1, EventV2.versionedType(SessionEvent.PromptAdmitted.type, 1)],
           [2, EventV2.versionedType(SessionEvent.Prompted.type, 1)],
         ])
+      }).pipe(Effect.provide(Layer.fresh(targetLayer)))
+    }),
+  )
+
+  it.effect("rebuilds input and execution projections from durable lifecycle history", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionV2.Service
+      const events = yield* EventV2.Service
+      const sourceDb = (yield* Database.Service).db
+      const created = yield* session.create({ id: SessionV2.ID.make("ses_lifecycle_reprojection"), location })
+      const cancelled = yield* session.prompt({
+        id: SessionMessage.ID.make("msg_cancelled_reprojection"),
+        sessionID: created.id,
+        prompt: Prompt.make({ text: "original" }),
+        resume: false,
+      })
+      yield* session.replaceInput({
+        sessionID: created.id,
+        messageID: cancelled.id,
+        prompt: Prompt.make({ text: "replacement" }),
+      })
+      yield* session.cancelInput({ sessionID: created.id, messageID: cancelled.id })
+      const claimed = yield* session.prompt({
+        id: SessionMessage.ID.make("msg_claimed_reprojection"),
+        sessionID: created.id,
+        prompt: Prompt.make({ text: "execute" }),
+        resume: false,
+      })
+      const attemptID = SessionExecutionAttempt.ID.make("sea_reprojection")
+      const ownerEpoch = "owner-reprojection"
+      const timestamp = yield* DateTime.now
+      yield* events.publishBatch([
+        {
+          definition: SessionEvent.PromptClaimed,
+          data: { sessionID: created.id, messageID: claimed.id, attemptID, ownerEpoch, timestamp },
+        },
+        {
+          definition: SessionEvent.Execution.Scheduled,
+          data: { sessionID: created.id, messageID: claimed.id, attemptID, ownerEpoch, timestamp },
+        },
+      ])
+      yield* events.publish(SessionEvent.Execution.Started, {
+        sessionID: created.id,
+        messageID: claimed.id,
+        attemptID,
+        ownerEpoch,
+        timestamp,
+      })
+      yield* events.publish(SessionEvent.Execution.Completed, {
+        sessionID: created.id,
+        messageID: claimed.id,
+        attemptID,
+        ownerEpoch,
+        timestamp,
+      })
+      const serialized = (yield* sourceDb
+        .select()
+        .from(EventTable)
+        .where(eq(EventTable.aggregate_id, created.id))
+        .orderBy(asc(EventTable.seq))
+        .all()).map((event) => ({
+        id: event.id,
+        aggregateID: event.aggregate_id,
+        seq: event.seq,
+        type: event.type,
+        data: event.data,
+      }))
+      const tmp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      )
+      const targetLayer = AppNodeBuilder.build(
+        LayerNode.group([Database.node, EventV2.node, SessionProjector.node, SessionStore.node]),
+        [[Database.node, Database.layerFromPath(path.join(tmp.path, "lifecycle.sqlite"))]],
+      )
+
+      yield* Effect.gen(function* () {
+        const db = (yield* Database.Service).db
+        const targetEvents = yield* EventV2.Service
+        const store = yield* SessionStore.Service
+        yield* db
+          .insert(ProjectTable)
+          .values({ id: ProjectV2.ID.global, worktree: location.directory, sandboxes: [] })
+          .run()
+        yield* targetEvents.replayAll(serialized)
+
+        expect(yield* SessionInput.find(db, cancelled.id)).toMatchObject({
+          prompt: { text: "replacement" },
+        })
+        expect(yield* SessionInput.find(db, cancelled.id)).toHaveProperty("cancelledAt")
+        expect(yield* SessionInput.find(db, claimed.id)).toMatchObject({ claimedAttemptID: attemptID })
+        expect(yield* SessionExecutionAttempt.find(db, attemptID)).toMatchObject({
+          status: "completed",
+          timeStarted: timestamp,
+          timeCompleted: timestamp,
+        })
+        const projected = yield* store.get(created.id)
+        if (!projected) return yield* Effect.die("Replayed Session projection is missing")
+        expect(yield* store.enrich([projected], new Set(), ownerEpoch)).toMatchObject([{ status: "idle" }])
       }).pipe(Effect.provide(Layer.fresh(targetLayer)))
     }),
   )

@@ -2,7 +2,7 @@ import { describe, expect } from "bun:test"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { EventV2 } from "@opencode-ai/core/event"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
-import { Deferred, Effect, Exit, Layer } from "effect"
+import { Deferred, Effect, Exit, Layer, Stream } from "effect"
 import { Session as SessionNs } from "@/session/session"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, type SessionID } from "../../src/session/schema"
@@ -45,6 +45,25 @@ const awaitDeferred = <T>(deferred: Deferred.Deferred<T>, message: string) =>
 const remove = (id: SessionID) => SessionNs.use.remove(id)
 
 describe("session.created event", () => {
+  it.instance("retains aggregate history through durable deletion", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const events = yield* EventV2Bridge.Service
+      const info = yield* session.create({})
+
+      yield* session.remove(info.id)
+
+      expect(
+        Array.from(yield* events.durable({ aggregateID: info.id }).pipe(Stream.take(2), Stream.runCollect)).map(
+          (event) => [event.durable?.seq, event.type],
+        ),
+      ).toEqual([
+        [0, SessionNs.Event.Created.type],
+        [1, SessionNs.Event.Deleted.type],
+      ])
+    }),
+  )
+
   it.instance("should emit session.created event when session is created", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

@@ -1,7 +1,10 @@
 import type { SessionApi, SessionInfo, SessionListInput } from "@opencode-ai/client/promise"
 import type { Session } from "@opencode-ai/sdk/v2/client"
 
-export function normalizeSessionInfo(input: SessionInfo | Session): Session {
+export type AppSessionStatus = "running" | "handoff_unknown" | "awaiting_run" | "idle"
+export type AppSession = Session & { status?: AppSessionStatus }
+
+export function normalizeSessionInfo(input: SessionInfo | Session): AppSession {
   if (!("location" in input)) return input
   return {
     id: input.id,
@@ -17,6 +20,7 @@ export function normalizeSessionInfo(input: SessionInfo | Session): Session {
     agent: input.agent,
     model: input.model,
     version: "",
+    status: sessionStatus(input),
     time: input.time,
     revert: input.revert && {
       messageID: input.revert.messageID,
@@ -24,6 +28,13 @@ export function normalizeSessionInfo(input: SessionInfo | Session): Session {
       snapshot: input.revert.snapshot,
     },
   }
+}
+
+export function sessionStatus(input: object | undefined): AppSessionStatus | undefined {
+  if (!input || !("status" in input)) return
+  const status = input.status
+  if (status === "running" || status === "handoff_unknown" || status === "awaiting_run" || status === "idle")
+    return status
 }
 
 export async function listAllSessions(api: Pick<SessionApi, "list">, input: Omit<SessionListInput, "cursor">) {

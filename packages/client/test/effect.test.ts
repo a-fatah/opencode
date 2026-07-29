@@ -15,6 +15,63 @@ test("sessions.get returns the decoded Effect projection", async () => {
   expect(DateTime.toEpochMillis(result.time.created)).toBe(1_717_171_717_000)
 })
 
+test("generated Effect session input and resume methods use the current contract", async () => {
+  const requests: Array<{ method: string; url: string; body?: string }> = []
+  const httpClient = HttpClient.make((request) => {
+    requests.push({ method: request.method, url: request.url, body: request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : undefined })
+    if (request.method === "DELETE")
+      return Effect.succeed(HttpClientResponse.fromWeb(request, new Response(null, { status: 204 })))
+    if (request.url.endsWith("/input/pending"))
+      return Effect.succeed(HttpClientResponse.fromWeb(request, Response.json([admission.data])))
+    if (request.method === "PUT")
+      return Effect.succeed(
+        HttpClientResponse.fromWeb(request, Response.json({ ...admission.data, prompt: { text: "Edited" } })),
+      )
+    return Effect.succeed(
+      HttpClientResponse.fromWeb(
+        request,
+        Response.json({ attemptID: request.url.endsWith("/resume/confirm") ? "sea_new" : "sea_run" }, { status: 202 }),
+      ),
+    )
+  })
+  const result = await Effect.gen(function* () {
+    const client = yield* OpenCode.make({ baseUrl: "http://localhost:3000" })
+    const pending = yield* client.sessions.pending({ sessionID: Session.ID.make("ses_test") })
+    const replaced = yield* client.sessions.replace({
+      sessionID: Session.ID.make("ses_test"),
+      messageID: SessionMessage.ID.make("msg_test"),
+      prompt: Prompt.make({ text: "Edited" }),
+    })
+    yield* client.sessions.cancel({
+      sessionID: Session.ID.make("ses_test"),
+      messageID: SessionMessage.ID.make("msg_test"),
+    })
+    const resumed = yield* client.sessions.resume({
+      sessionID: Session.ID.make("ses_test"),
+      expectedMessageID: SessionMessage.ID.make("msg_test"),
+      attemptID: "sea_run",
+    })
+    const confirmed = yield* client.sessions.confirm({
+      sessionID: Session.ID.make("ses_test"),
+      attemptID: "sea_old",
+      newAttemptID: "sea_new",
+    })
+    return { pending, replaced, resumed, confirmed }
+  }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient), Effect.runPromise)
+
+  expect(result.pending[0]?.id).toBe("msg_test")
+  expect(result.replaced.prompt.text).toBe("Edited")
+  expect(result.resumed).toEqual({ attemptID: "sea_run" })
+  expect(result.confirmed).toEqual({ attemptID: "sea_new" })
+  expect(requests.map((request) => [request.method, request.url])).toEqual([
+    ["GET", "http://localhost:3000/api/session/ses_test/input/pending"],
+    ["PUT", "http://localhost:3000/api/session/ses_test/input/msg_test"],
+    ["DELETE", "http://localhost:3000/api/session/ses_test/input/msg_test"],
+    ["POST", "http://localhost:3000/api/session/ses_test/resume"],
+    ["POST", "http://localhost:3000/api/session/ses_test/resume/confirm"],
+  ])
+})
+
 test("events.subscribe exposes and decodes the native Effect event stream", async () => {
   const httpClient = HttpClient.make((request) =>
     Effect.succeed(
@@ -211,6 +268,7 @@ const session = {
       updated: 1_717_171_717_000,
     },
     title: "Test",
+    status: "awaiting_run",
     location: { directory: "/tmp/project" },
   },
 }

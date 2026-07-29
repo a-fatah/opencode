@@ -9,11 +9,17 @@ import { Model } from "./model"
 import { DateTimeUtcFromMillis, NonNegativeInt, RelativePath } from "./schema"
 import { FileAttachment, Prompt } from "./prompt"
 import { SessionID } from "./session-id"
+import { SessionExecutionAttempt } from "./session-execution-attempt"
 import { Location } from "./location"
 import { SessionMessage } from "./session-message"
 import { Revert } from "./revert"
+import { SessionV1 } from "./session-v1"
 
 export { FileAttachment }
+
+// Session deletion keeps its persisted canonical wire identity across current and V1 history.
+export const Deleted = SessionV1.Event.Deleted
+export type Deleted = typeof Deleted.Type
 
 export const Source = Schema.Struct({
   start: NonNegativeInt,
@@ -97,6 +103,95 @@ export const PromptAdmitted = Event.define({
   schema: PromptFields,
 })
 export type PromptAdmitted = typeof PromptAdmitted.Type
+
+export const PromptReplaced = Event.define({
+  type: "session.next.prompt.replaced",
+  ...options,
+  schema: PromptFields,
+})
+export type PromptReplaced = typeof PromptReplaced.Type
+
+export const PromptCancelled = Event.define({
+  type: "session.next.prompt.cancelled",
+  ...options,
+  schema: {
+    ...Base,
+    messageID: SessionMessage.ID,
+  },
+})
+export type PromptCancelled = typeof PromptCancelled.Type
+
+export const PromptClaimed = Event.define({
+  type: "session.next.prompt.claimed",
+  ...options,
+  schema: {
+    ...Base,
+    messageID: SessionMessage.ID,
+    attemptID: SessionExecutionAttempt.ID,
+    ownerEpoch: Schema.String,
+  },
+})
+export type PromptClaimed = typeof PromptClaimed.Type
+
+const ExecutionFields = {
+  ...Base,
+  attemptID: SessionExecutionAttempt.ID,
+  messageID: SessionMessage.ID,
+  ownerEpoch: Schema.String,
+}
+
+export namespace Execution {
+  export const Scheduled = Event.define({
+    type: "session.execution.scheduled",
+    ...options,
+    schema: ExecutionFields,
+  })
+  export type Scheduled = typeof Scheduled.Type
+
+  export const Started = Event.define({
+    type: "session.execution.started",
+    ...options,
+    schema: ExecutionFields,
+  })
+  export type Started = typeof Started.Type
+
+  export const Completed = Event.define({
+    type: "session.execution.completed",
+    ...options,
+    schema: ExecutionFields,
+  })
+  export type Completed = typeof Completed.Type
+
+  export const Failed = Event.define({
+    type: "session.execution.failed",
+    ...options,
+    schema: {
+      ...ExecutionFields,
+      failure: SessionExecutionAttempt.Failure,
+    },
+  })
+  export type Failed = typeof Failed.Type
+
+  export const Interrupted = Event.define({
+    type: "session.execution.interrupted",
+    ...options,
+    schema: {
+      ...ExecutionFields,
+      interruption: SessionExecutionAttempt.Interruption,
+    },
+  })
+  export type Interrupted = typeof Interrupted.Type
+
+  export const Superseded = Event.define({
+    type: "session.execution.superseded",
+    ...options,
+    schema: {
+      ...ExecutionFields,
+      supersededByAttemptID: SessionExecutionAttempt.ID,
+    },
+  })
+  export type Superseded = typeof Superseded.Type
+}
 
 export const ContextUpdated = Event.define({
   type: "session.next.context.updated",
@@ -446,11 +541,21 @@ export namespace RevertEvent {
 }
 
 export const DurableDefinitions = Event.inventory(
+  Deleted,
   AgentSwitched,
   ModelSwitched,
   Moved,
   Prompted,
   PromptAdmitted,
+  PromptReplaced,
+  PromptCancelled,
+  PromptClaimed,
+  Execution.Scheduled,
+  Execution.Started,
+  Execution.Completed,
+  Execution.Failed,
+  Execution.Interrupted,
+  Execution.Superseded,
   ContextUpdated,
   Synthetic,
   Shell.Started,
@@ -477,11 +582,21 @@ export const DurableDefinitions = Event.inventory(
 )
 
 export const Definitions = Event.inventory(
+  Deleted,
   AgentSwitched,
   ModelSwitched,
   Moved,
   Prompted,
   PromptAdmitted,
+  PromptReplaced,
+  PromptCancelled,
+  PromptClaimed,
+  Execution.Scheduled,
+  Execution.Started,
+  Execution.Completed,
+  Execution.Failed,
+  Execution.Interrupted,
+  Execution.Superseded,
   ContextUpdated,
   Synthetic,
   Shell.Started,

@@ -1,16 +1,15 @@
 import type { SessionTab, Tab } from "./tabs"
 
 export type ClosedTab = {
-  tab: SessionTab
+  tab: Exclude<Tab, { type: "draft" }>
   index: number
 }
 
 const CLOSED_TAB_LIMIT = 25
 
-// Only session tabs are recorded; closing a draft tab deletes its persisted
-// state, so a reopened draft would come back empty anyway.
+// Draft state is deleted on close, so only durable tabs are reopenable.
 export function pushClosedTab(stack: ClosedTab[], tab: Tab, index: number): ClosedTab[] {
-  if (tab.type !== "session") return stack
+  if (tab.type === "draft") return stack
   return [...stack, { tab: { ...tab }, index }].slice(-CLOSED_TAB_LIMIT)
 }
 
@@ -27,7 +26,9 @@ export function takeClosedTab(stack: ClosedTab[], tabs: Tab[]): { entry?: Closed
 
 export function removeClosedTabs(stack: ClosedTab[], server: SessionTab["server"], sessionIDs: string[]) {
   const removed = new Set(sessionIDs)
-  return stack.filter((entry) => entry.tab.server !== server || !removed.has(entry.tab.sessionId))
+  return stack.filter(
+    (entry) => entry.tab.type !== "session" || entry.tab.server !== server || !removed.has(entry.tab.sessionId),
+  )
 }
 
 export function nextTabAfterClose(tabs: Tab[], index: number, active: boolean) {
@@ -35,6 +36,11 @@ export function nextTabAfterClose(tabs: Tab[], index: number, active: boolean) {
   return tabs[index + 1] ?? tabs[index - 1] ?? null
 }
 
-function isOpen(tabs: Tab[], tab: SessionTab) {
-  return tabs.some((item) => item.type === "session" && item.server === tab.server && item.sessionId === tab.sessionId)
+function isOpen(tabs: Tab[], tab: ClosedTab["tab"]) {
+  return tabs.some((item) => {
+    if (item.type !== tab.type || item.server !== tab.server) return false
+    if (item.type === "session" && tab.type === "session") return item.sessionId === tab.sessionId
+    if (item.type === "watcher" && tab.type === "watcher") return item.watcherID === tab.watcherID
+    return true
+  })
 }

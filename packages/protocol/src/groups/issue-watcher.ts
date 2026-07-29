@@ -58,6 +58,17 @@ export const IssueWatcherGroup = HttpApiGroup.make("server.issueWatcher")
     }).annotateMerge(OpenApi.annotations({ identifier: "v2.issueWatcher.integration.rotate", summary: "Rotate issue source credentials" })),
   )
   .add(
+    HttpApiEndpoint.post("issueWatcher.preview", "/api/issue-watcher/preview", {
+      payload: IssueWatcher.PreviewInput,
+      success: IssueWatcher.Preview,
+      error: SourceErrors,
+    }).annotateMerge(OpenApi.annotations({
+      identifier: "v2.issueWatcher.preview",
+      summary: "Preview an issue watcher",
+      description: "Search and preview at most 100 issues without persisting watcher state or advancing a cursor.",
+    })),
+  )
+  .add(
     HttpApiEndpoint.get("issueWatcher.getSettings", "/api/issue-watcher/settings", {
       success: IssueWatcher.Settings,
     }).annotateMerge(OpenApi.annotations({ identifier: "v2.issueWatcher.settings.get", summary: "Get issue watcher settings" })),

@@ -78,6 +78,7 @@ export interface Interface {
   }
   readonly remote: {
     readonly get: (repository: Repository, name?: string) => Effect.Effect<string | undefined>
+    readonly list: (repository: Repository) => Effect.Effect<readonly string[]>
   }
   readonly history: {
     readonly head: (repository: Repository) => Effect.Effect<string | undefined>
@@ -206,6 +207,15 @@ const layer = Layer.effect(
       const result = yield* run(repository.worktree, proc)(["remote", "get-url", name])
       if (result.exitCode !== 0) return undefined
       return result.text.trim() || undefined
+    })
+
+    const remotes = Effect.fn("Git.remote.list")(function* (repository: Repository) {
+      const names = yield* run(repository.worktree, proc)(["remote"])
+      if (names.exitCode !== 0) return []
+      return yield* Effect.forEach(
+        names.text.split("\n").map((name) => name.trim()).filter(Boolean),
+        (name) => remote(repository, name),
+      ).pipe(Effect.map((values) => values.filter((value): value is string => value !== undefined)))
     })
 
     const roots = Effect.fn("Git.history.rootCommits")(function* (repository: Repository) {
@@ -924,7 +934,7 @@ const layer = Layer.effect(
 
     return Service.of({
       repo: { discover, clone, create },
-      remote: { get: remote },
+      remote: { get: remote, list: remotes },
       history: { head, branch, defaultRemoteBranch: remoteHead, rootCommits: roots },
       sync: { fetchRemotes: fetch, fetchBranch, checkoutRemoteBranch: checkout, resetHard: reset },
       change: { capture, apply, discard },

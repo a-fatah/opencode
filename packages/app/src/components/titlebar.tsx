@@ -218,6 +218,15 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
                   if (parent) return parent
                 }
               }
+              if (route.type === "inbox" || route.type === "watchers") {
+                return tabsStore.find((item) => item.type === route.type && item.server === route.server)
+              }
+              if (route.type === "watcher") {
+                return tabsStore.find(
+                  (item) =>
+                    item.type === "watcher" && item.server === route.server && item.watcherID === route.watcherID,
+                )
+              }
             }
 
             const currentTab = () => matchRoute(layout.route())
@@ -237,6 +246,14 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
                 const sessionId = s.parentID ?? s.id
                 const next = { server: route.server ?? server.key, sessionId }
                 tabsStoreActions.addSessionTab(next)
+                return
+              }
+              if (route.type === "inbox" || route.type === "watchers") {
+                tabsStoreActions.addUtilityTab({ type: route.type, server: route.server })
+                return
+              }
+              if (route.type === "watcher") {
+                tabsStoreActions.addUtilityTab({ type: "watcher", server: route.server, watcherID: route.watcherID })
               }
             })
 

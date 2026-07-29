@@ -23,6 +23,7 @@ import { ConfigProvider } from "./config/provider"
 import { ConfigReference } from "./config/reference"
 import { ConfigToolOutput } from "./config/tool-output"
 import { ConfigWatcher } from "./config/watcher"
+import { ConfigIssueWatcher } from "./config/issue-watcher"
 import { ConfigV1 } from "./v1/config/config"
 import { ConfigMigrateV1 } from "./v1/config/migrate"
 
@@ -68,6 +69,9 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   }),
   watcher: ConfigWatcher.Info.pipe(Schema.optional).annotate({
     description: "Filesystem watcher configuration",
+  }),
+  issueWatcher: ConfigIssueWatcher.Info.pipe(Schema.optional).annotate({
+    description: "Server-global issue watcher limits",
   }),
   formatter: ConfigFormatter.Info.pipe(Schema.optional).annotate({
     description: "Enable built-in formatters or configure formatter overrides",

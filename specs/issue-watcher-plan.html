@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Issue Watcher Delivery Map</title>
+    <style>
+      :root {
+        --ink: #17211d;
+        --muted: #657069;
+        --paper: #f3efe5;
+        --card: #fffdf7;
+        --line: #a9b1a8;
+        --strong-line: #26362f;
+        --green: #2f6b4f;
+        --green-soft: #dce9df;
+        --amber: #a86620;
+        --amber-soft: #f4e3c5;
+        --red: #9b3c36;
+        --red-soft: #f2d8d2;
+        --blue: #315f7b;
+        --blue-soft: #d8e6ed;
+        --shadow: 0 18px 44px rgba(23, 33, 29, 0.1);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      html { color: var(--ink); background: var(--paper); scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        min-width: 320px;
+        background:
+          radial-gradient(circle at 8% 0%, rgba(47, 107, 79, 0.14), transparent 30rem),
+          linear-gradient(90deg, rgba(23, 33, 29, 0.04) 1px, transparent 1px),
+          linear-gradient(rgba(23, 33, 29, 0.04) 1px, transparent 1px),
+          var(--paper);
+        background-size: auto, 48px 48px, 48px 48px, auto;
+      }
+
+      button, select { font: inherit; }
+      h1, h2, h3, p { margin: 0; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+      .shell { max-width: 1600px; margin: 0 auto; padding: 32px 28px 72px; }
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);
+        gap: 28px;
+        align-items: end;
+        padding: 26px 0 34px;
+        border-bottom: 2px solid var(--strong-line);
+      }
+      .kicker, .section-label {
+        display: inline-flex;
+        width: fit-content;
+        border: 1px solid var(--strong-line);
+        padding: 5px 8px;
+        font-size: 0.72rem;
+        font-weight: 800;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+      h1 {
+        max-width: 970px;
+        margin-top: 18px;
+        font-size: clamp(3.4rem, 9vw, 9rem);
+        line-height: 0.83;
+        letter-spacing: -0.075em;
+      }
+      .lede { max-width: 720px; margin-top: 22px; color: var(--muted); font-size: 1.08rem; }
+      .hero-meta { display: grid; gap: 10px; }
+      .meta-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--line);
+        font-size: 0.85rem;
+      }
+      .meta-row span:first-child { color: var(--muted); }
+
+      .toolbar {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        align-items: center;
+        gap: 14px;
+        margin: 22px 0;
+        border: 1px solid var(--strong-line);
+        padding: 12px;
+        background: rgba(255, 253, 247, 0.94);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(12px);
+      }
+      .filters { display: flex; flex-wrap: wrap; gap: 7px; }
+      .filter {
+        border: 1px solid var(--line);
+        padding: 7px 10px;
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+      }
+      .filter:hover, .filter[aria-pressed="true"] {
+        border-color: var(--strong-line);
+        background: var(--ink);
+        color: var(--card);
+      }
+      .progress-wrap { display: flex; align-items: center; gap: 12px; min-width: min(100%, 310px); }
+      .progress-track { flex: 1; height: 9px; border: 1px solid var(--strong-line); background: var(--paper); }
+      .progress-fill { height: 100%; background: var(--green); transition: width 220ms ease; }
+      .progress-copy { min-width: 84px; font-size: 0.78rem; font-weight: 800; text-align: right; }
+
+      .overview {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin: 22px 0 34px;
+      }
+      .stat { border: 1px solid var(--strong-line); padding: 17px; background: var(--card); }
+      .stat strong { display: block; font-size: 2.2rem; line-height: 1; letter-spacing: -0.06em; }
+      .stat span { display: block; margin-top: 7px; color: var(--muted); font-size: 0.78rem; text-transform: uppercase; }
+
+      .principles { margin-bottom: 38px; }
+      .principle-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+      .principle { border-top: 3px solid var(--green); padding: 13px 2px 0; color: var(--muted); font-size: 0.88rem; }
+
+      .dependency-map { overflow-x: auto; margin: 16px 0 42px; padding-bottom: 8px; }
+      .dependency-track {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(132px, 1fr));
+        grid-template-rows: repeat(2, minmax(90px, auto));
+        gap: 20px 34px;
+        align-items: stretch;
+        min-width: 1160px;
+      }
+      .dependency-node {
+        position: relative;
+        min-width: 132px;
+        border: 1px solid var(--strong-line);
+        padding: 13px;
+        background: var(--card);
+        color: inherit;
+        text-decoration: none;
+      }
+      .dependency-node.has-dependency::before {
+        content: "";
+        position: absolute;
+        right: 100%;
+        top: 50%;
+        width: 34px;
+        border-top: 2px solid var(--strong-line);
+      }
+      .dependency-node.has-dependency::after {
+        content: "";
+        position: absolute;
+        right: calc(100% + 2px);
+        top: calc(50% - 4px);
+        border: 4px solid transparent;
+        border-right-color: var(--strong-line);
+        transform: rotate(180deg);
+      }
+      .dependency-node.merge { border-width: 2px; }
+      .node-number { color: var(--green); font: 800 0.72rem ui-monospace, monospace; }
+      .node-name { display: block; margin-top: 6px; font-size: 0.83rem; line-height: 1.15; }
+
+      .waves { display: grid; gap: 22px; }
+      .wave {
+        scroll-margin-top: 92px;
+        border: 2px solid var(--strong-line);
+        background: rgba(255, 253, 247, 0.94);
+        box-shadow: var(--shadow);
+      }
+      .wave[hidden] { display: none; }
+      .wave-head {
+        display: grid;
+        grid-template-columns: 82px minmax(0, 1fr) auto;
+        gap: 18px;
+        align-items: start;
+        padding: 22px;
+        border-bottom: 1px solid var(--strong-line);
+      }
+      .wave-number { font: 900 3.2rem/0.8 ui-monospace, monospace; letter-spacing: -0.1em; color: var(--green); }
+      .wave-title { font-size: clamp(1.8rem, 4vw, 3.4rem); line-height: 0.95; letter-spacing: -0.055em; }
+      .wave-objective { max-width: 800px; margin-top: 10px; color: var(--muted); }
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        border: 1px solid currentColor;
+        padding: 5px 8px;
+        font-size: 0.7rem;
+        font-weight: 900;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+      }
+      .status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+      .status-planned { color: var(--muted); }
+      .status-ready { color: var(--blue); background: var(--blue-soft); }
+      .status-in_progress { color: var(--amber); background: var(--amber-soft); }
+      .status-blocked { color: var(--red); background: var(--red-soft); }
+      .status-complete { color: var(--green); background: var(--green-soft); }
+
+      .wave-meta { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 13px; }
+      .chip { border: 1px solid var(--line); padding: 4px 7px; color: var(--muted); font-size: 0.72rem; }
+      .wave-body { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(290px, 0.8fr); }
+      .lanes { display: grid; grid-template-columns: repeat(var(--lane-count), minmax(0, 1fr)); border-right: 1px solid var(--strong-line); }
+      .lane { min-width: 0; padding: 20px; }
+      .lane + .lane { border-left: 1px solid var(--line); }
+      .lane h3, .outcomes h3 { font-size: 0.76rem; letter-spacing: 0.1em; text-transform: uppercase; }
+      .lane-status { margin-top: 7px; color: var(--muted); font-size: 0.72rem; }
+      .work-list, .outcome-list { display: grid; gap: 10px; margin: 16px 0 0; padding: 0; list-style: none; }
+      .work-list li, .outcome-list li { position: relative; padding-left: 17px; font-size: 0.86rem; line-height: 1.4; }
+      .work-list li::before { content: ""; position: absolute; left: 0; top: 0.55em; width: 7px; border-top: 2px solid var(--green); }
+      .outcomes { padding: 20px; background: var(--green-soft); }
+      .outcome-list li::before { content: "✓"; position: absolute; left: 0; color: var(--green); font-weight: 900; }
+      .dependency-copy { margin-top: 20px; padding-top: 14px; border-top: 1px solid rgba(47, 107, 79, 0.35); color: var(--muted); font-size: 0.76rem; }
+
+      .empty { border: 1px dashed var(--strong-line); padding: 36px; text-align: center; color: var(--muted); }
+      .error { max-width: 760px; margin: 80px auto; border: 2px solid var(--red); padding: 24px; background: var(--red-soft); }
+
+      @media (max-width: 1050px) {
+        .hero { grid-template-columns: 1fr; }
+        .overview, .principle-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .wave-body { grid-template-columns: 1fr; }
+        .lanes { border-right: 0; border-bottom: 1px solid var(--strong-line); }
+      }
+      @media (max-width: 720px) {
+        .shell { padding: 18px 14px 50px; }
+        .toolbar { position: static; }
+        .overview, .principle-grid, .lanes { grid-template-columns: 1fr; }
+        .lane + .lane { border-left: 0; border-top: 1px solid var(--line); }
+        .wave-head { grid-template-columns: 54px 1fr; padding: 17px; }
+        .wave-head > .status { grid-column: 1 / -1; justify-self: start; }
+        .wave-number { font-size: 2.3rem; }
+      }
+      @media print {
+        body { background: white; }
+        .shell { max-width: none; padding: 0; }
+        .toolbar { display: none; }
+        .wave { break-inside: avoid; box-shadow: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <main id="app" class="shell"></main>
+    <script src="./issue-watcher-plan.js"></script>
+    <script>
+      (() => {
+        const data = window.ISSUE_WATCHER_PLAN
+        const app = document.querySelector("#app")
+        if (!data) {
+          app.innerHTML = '<div class="error"><h2>Plan data unavailable</h2><p>Load <code>issue-watcher-plan.js</code> beside this HTML file.</p></div>'
+          return
+        }
+
+        const escape = (value) => String(value).replace(/[&<>"]/g, (char) => ({
+          "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;",
+        })[char])
+        const waveByID = new Map(data.waves.map((wave) => [wave.id, wave]))
+        const labelFor = (status) => data.statusDefinitions[status]?.label ?? status
+        const completed = data.waves.filter((wave) => wave.status === "complete").length
+        const progress = data.waves.length ? Math.round((completed / data.waves.length) * 100) : 0
+        const parallelLanes = data.waves.reduce((total, wave) => total + wave.lanes.length, 0)
+        const screenNames = [...new Set(data.waves.flatMap((wave) => wave.screens))]
+
+        const statusBadge = (status) => `<span class="status status-${escape(status)}">${escape(labelFor(status))}</span>`
+        const chips = (items) => items.map((item) => `<span class="chip">${escape(item)}</span>`).join("")
+        const dependencyNames = (wave) => wave.dependsOn.length
+          ? wave.dependsOn.map((id) => waveByID.get(id)?.name ?? id).join(" + ")
+          : "No dependencies"
+
+        const depthCache = new Map()
+        const depthOf = (wave) => {
+          if (depthCache.has(wave.id)) return depthCache.get(wave.id)
+          const depth = wave.dependsOn.length
+            ? 1 + Math.max(...wave.dependsOn.map((id) => depthOf(waveByID.get(id))))
+            : 0
+          depthCache.set(wave.id, depth)
+          return depth
+        }
+        const depthCounts = new Map()
+        const map = data.waves.map((wave) => {
+          const depth = depthOf(wave)
+          const row = (depthCounts.get(depth) ?? 0) + 1
+          depthCounts.set(depth, row)
+          const classes = ["dependency-node"]
+          if (wave.dependsOn.length) classes.push("has-dependency")
+          if (wave.dependsOn.length > 1) classes.push("merge")
+          return `<a class="${classes.join(" ")}" href="#${escape(wave.id)}" style="grid-column: ${depth + 1}; grid-row: ${row}">
+            <span class="node-number">W${wave.number}</span>
+            <strong class="node-name">${escape(wave.name)}</strong>
+          </a>`
+        }).join("")
+
+        const waveCards = data.waves.map((wave) => {
+          const lanes = wave.lanes.map((lane) => `<section class="lane">
+            <h3>${escape(lane.name)}</h3>
+            <div class="lane-status">${escape(labelFor(lane.status))}</div>
+            <ul class="work-list">${lane.work.map((item) => `<li>${escape(item)}</li>`).join("")}</ul>
+          </section>`).join("")
+          return `<article class="wave" id="${escape(wave.id)}" data-status="${escape(wave.status)}">
+            <header class="wave-head">
+              <div class="wave-number">${String(wave.number).padStart(2, "0")}</div>
+              <div>
+                <h2 class="wave-title">${escape(wave.name)}</h2>
+                <p class="wave-objective">${escape(wave.objective)}</p>
+                <div class="wave-meta">
+                  ${chips(wave.specSlices)}
+                  ${chips(wave.screens.map((screen) => `Screen: ${screen}`))}
+                </div>
+              </div>
+              ${statusBadge(wave.status)}
+            </header>
+            <div class="wave-body">
+              <div class="lanes" style="--lane-count: ${wave.lanes.length}">${lanes}</div>
+              <aside class="outcomes">
+                <h3>Exit conditions</h3>
+                <ul class="outcome-list">${wave.postconditions.map((item) => `<li>${escape(item)}</li>`).join("")}</ul>
+                <p class="dependency-copy"><strong>Requires:</strong> ${escape(dependencyNames(wave))}<br /><strong>Unlocks:</strong> ${escape(wave.unlocks.map((id) => waveByID.get(id)?.name ?? id).join(", ") || "Release complete")}</p>
+              </aside>
+            </div>
+          </article>`
+        }).join("")
+
+        app.innerHTML = `
+          <header class="hero">
+            <div>
+              <span class="kicker">Implementation waves</span>
+              <h1>${escape(data.title)}</h1>
+              <p class="lede">Eight dependency-ordered waves. The sequence protects durable state and external side effects, while ${parallelLanes} lanes expose work that can proceed concurrently.</p>
+            </div>
+            <div class="hero-meta">
+              <div class="meta-row"><span>Source</span><strong>${escape(data.sourceSpec)}</strong></div>
+              <div class="meta-row"><span>Plan version</span><strong>${escape(data.version)}</strong></div>
+              <div class="meta-row"><span>Updated</span><strong>${escape(data.updatedAt)}</strong></div>
+              <div class="meta-row"><span>Tracking file</span><strong>issue-watcher-plan.js</strong></div>
+            </div>
+          </header>
+
+          <nav class="toolbar" aria-label="Plan controls">
+            <div class="filters" role="group" aria-label="Filter waves">
+              <button class="filter" data-filter="all" aria-pressed="true">All</button>
+              ${Object.keys(data.statusDefinitions).map((status) => `<button class="filter" data-filter="${escape(status)}" aria-pressed="false">${escape(labelFor(status))}</button>`).join("")}
+            </div>
+            <div class="progress-wrap" aria-label="Overall progress">
+              <div class="progress-track"><div class="progress-fill" style="width: ${progress}%"></div></div>
+              <span class="progress-copy">${completed}/${data.waves.length} waves</span>
+            </div>
+          </nav>
+
+          <section class="overview" aria-label="Plan summary">
+            <div class="stat"><strong>${data.waves.length}</strong><span>Ordered waves</span></div>
+            <div class="stat"><strong>${parallelLanes}</strong><span>Parallel lanes</span></div>
+            <div class="stat"><strong>${screenNames.length}</strong><span>Product screens</span></div>
+            <div class="stat"><strong>${progress}%</strong><span>Wave completion</span></div>
+          </section>
+
+          <section class="principles">
+            <span class="section-label">Delivery rules</span>
+            <div class="principle-grid">${data.principles.map((item) => `<p class="principle">${escape(item)}</p>`).join("")}</div>
+          </section>
+
+          <section>
+            <span class="section-label">Dependency spine</span>
+            <div class="dependency-map"><div class="dependency-track">${map}</div></div>
+          </section>
+
+          <section class="waves" aria-label="Implementation waves">${waveCards}</section>
+          <div class="empty" hidden>No waves match this status.</div>
+        `
+
+        const buttons = [...document.querySelectorAll(".filter")]
+        const cards = [...document.querySelectorAll(".wave")]
+        const empty = document.querySelector(".empty")
+        buttons.forEach((button) => button.addEventListener("click", () => {
+          const filter = button.dataset.filter
+          buttons.forEach((item) => item.setAttribute("aria-pressed", String(item === button)))
+          cards.forEach((card) => { card.hidden = filter !== "all" && card.dataset.status !== filter })
+          empty.hidden = cards.some((card) => !card.hidden)
+        }))
+      })()
+    </script>
+  </body>
+</html>

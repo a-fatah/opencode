@@ -21,6 +21,18 @@ export type InvalidRequestError = {
 export const isInvalidRequestError = (value: unknown): value is InvalidRequestError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "InvalidRequestError"
 
+export type IssueWatcherOwnerConflict = { readonly _tag: "IssueWatcherOwnerConflict"; readonly message: string }
+export const isIssueWatcherOwnerConflict = (value: unknown): value is IssueWatcherOwnerConflict =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "IssueWatcherOwnerConflict"
+
+export type IssueWatcherNotFoundError = {
+  readonly _tag: "IssueWatcherNotFoundError"
+  readonly watcherID: string
+  readonly message: string
+}
+export const isIssueWatcherNotFoundError = (value: unknown): value is IssueWatcherNotFoundError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "IssueWatcherNotFoundError"
+
 export type InvalidCursorError = { readonly _tag: "InvalidCursorError"; readonly message: string }
 export const isInvalidCursorError = (value: unknown): value is InvalidCursorError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "InvalidCursorError"
@@ -102,6 +114,777 @@ export const isProjectCopyError = (value: unknown): value is ProjectCopyError =>
   typeof value === "object" && value !== null && "name" in value && value["name"] === "ProjectCopyError"
 
 export type HealthGetOutput = { readonly healthy: true }
+
+export type IssueWatchersListOutput = ReadonlyArray<{
+  readonly id: string
+  readonly integrationID: string
+  readonly connectionID: string
+  readonly name: string
+  readonly enabled: boolean
+  readonly projectID?: string
+  readonly criteria: {
+    readonly issueProjects: ReadonlyArray<string>
+    readonly assignee?: "me" | { readonly id: string }
+    readonly labels?: ReadonlyArray<string>
+    readonly statuses?: ReadonlyArray<string>
+    readonly watchUpdates: boolean
+    readonly escape?: { readonly language: "jql" | "linear-filter" | "github-search"; readonly query: string }
+  }
+  readonly routing: {
+    readonly repoField?: { readonly fieldName: string }
+    readonly mappings: ReadonlyArray<{
+      readonly key: { readonly type: "label" | "component" | "issueProject"; readonly value: string }
+      readonly projectID: string
+    }>
+    readonly fallback: "inbox"
+    readonly workspace:
+      | { readonly type: "branch"; readonly pattern: string }
+      | { readonly type: "current" }
+      | { readonly type: "worktree" }
+  }
+  readonly action: {
+    readonly mode: "inbox" | "awaiting_run" | "run"
+    readonly promptTemplate: string
+    readonly writeback: {
+      readonly comment: boolean
+      readonly transitionOnStart?: string
+      readonly commentOnFailure: boolean
+    }
+  }
+  readonly cursor?: string
+  readonly lastRunAt?: number
+  readonly lastError?: string
+  readonly archivedAt?: number
+  readonly timeCreated: number
+  readonly timeUpdated: number
+}>
+
+export type IssueWatchersCreateInput = {
+  readonly integrationID: {
+    readonly integrationID: string
+    readonly connectionID: string
+    readonly name: string
+    readonly enabled?: boolean
+    readonly projectID?: string
+    readonly criteria: {
+      readonly issueProjects: ReadonlyArray<string>
+      readonly assignee?: "me" | { readonly id: string }
+      readonly labels?: ReadonlyArray<string>
+      readonly statuses?: ReadonlyArray<string>
+      readonly watchUpdates: boolean
+      readonly escape?: { readonly language: "jql" | "linear-filter" | "github-search"; readonly query: string }
+    }
+    readonly routing: {
+      readonly repoField?: { readonly fieldName: string }
+      readonly mappings: ReadonlyArray<{
+        readonly key: { readonly type: "label" | "component" | "issueProject"; readonly value: string }
+        readonly projectID: string
+      }>
+      readonly fallback: "inbox"
+      readonly workspace:
+        | { readonly type: "branch"; readonly pattern: string }
+        | { readonly type: "current" }
+        | { readonly type: "worktree" }
+    }
+    readonly action: {
+      readonly mode: "inbox" | "awaiting_run" | "run"
+      readonly promptTemplate: string
+      readonly writeback: {
+        readonly comment: boolean
+        readonly transitionOnStart?: string
+        readonly commentOnFailure: boolean
+      }
+    }
+  }["integrationID"]
+  readonly connectionID: {
+    readonly integrationID: string
+    readonly connectionID: string
+    readonly name: string
+    readonly enabled?: boolean
+    readonly projectID?: string
+    readonly criteria: {
+      readonly issueProjects: ReadonlyArray<string>
+      readonly assignee?: "me" | { readonly id: string }
+      readonly labels?: ReadonlyArray<string>
+      readonly statuses?: ReadonlyArray<string>
+      readonly watchUpdates: boolean
+      readonly escape?: { readonly language: "jql" | "linear-filter" | "github-search"; readonly query: string }
+    }
+    readonly routing: {
+      readonly repoField?: { readonly fieldName: string }
+      readonly mappings: ReadonlyArray<{
+        readonly key: { readonly type: "label" | "component" | "issueProject"; readonly value: string }
+        readonly projectID: string
+      }>
+      readonly fallback: "inbox"
+      readonly workspace:
+        | { readonly type: "branch"; readonly pattern: string }
+        | { readonly type: "current" }
+        | { readonly type: "worktree" }
+    }
+    readonly action: {
+      readonly mode: "inbox" | "awaiting_run" | "run"
+      readonly promptTemplate: string
+      readonly writeback: {
+        readonly comment: boolean
+        readonly transitionOnStart?: string
+        readonly commentOnFailure: boolean
+      }
+    }
+  }["connectionID"]
+  readonly name: {
+    readonly integrationID: string
+    readonly connectionID: string
+    readonly name: string
+    readonly enabled?: boolean
+    readonly projectID?: string
+    readonly criteria: {
+      readonly issueProjects: ReadonlyArray<string>
+      readonly assignee?: "me" | { readonly id: string }
+      readonly labels?: ReadonlyArray<string>
+      readonly statuses?: ReadonlyArray<string>
+      readonly watchUpdates: boolean
+      readonly escape?: { readonly language: "jql" | "linear-filter" | "github-search"; readonly query: string }
+    }
+    readonly routing: {
+      readonly repoField?: { readonly fieldName: string }
+      readonly mappings: ReadonlyArray<{
+        readonly key: { readonly type: "label" | "component" | "issueProject"; readonly value: string }
+        readonly projectID: string
+      }>
+      readonly fallback: "inbox"
+      readonly workspace:
+        | { readonly type: "branch"; readonly pattern: string }
+        | { readonly type: "current" }
+        | { readonly type: "worktree" }
+    }
+    readonly action: {
+      readonly mode: "inbox" | "awaiting_run" | "run"
+      readonly promptTemplate: string
+      readonly writeback: {
+        readonly comment: boolean
+        readonly transitionOnStart?: string
+        readonly commentOnFailure: boolean
+      }
+    }
+  }["name"]
+  readonly enabled?: {
+    readonly integrationID: string
+    readonly connectionID: string
+    readonly name: string
+    readonly enabled?: boolean
+    readonly projectID?: string
+    readonly criteria: {
+      readonly issueProjects: ReadonlyArray<string>
+      readonly assignee?: "me" | { readonly id: string }
+      readonly labels?: ReadonlyArray<string>
+      readonly statuses?: ReadonlyArray<string>
+      readonly watchUpdates: boolean
+      readonly escape?: { readonly language: "jql" | "linear-filter" | "github-search"; readonly query: string }
+    }
+    readonly routing: {
+      readonly repoField?: { readonly fieldName: string }
+      readonly mappings: ReadonlyArray<{
+        readonly key: { readonly type: "label" | "component" | "issueProject"; readonly value: string }
+        readonly projectID: string
+      }>
+      readonly fallback: "inbox"
+      readonly workspace:
+        | { readonly type: "branch"; readonly pattern: string }
+        | { readonly type: "current" }
+        | { readonly type: "worktree" }
+    }
+    readonly action: {
+      readonly mode: "inbox" | "awaiting_run" | "run"
+      readonly promptTemplate: string
+      readonly writeback: {
+        readonly comment: boolean
+        readonly transitionOnStart?: string
+        readonly commentOnFailure: boolean
+      }
+    }
+  }["enabled"]
+  readonly projectID?: {
+    readonly integrationID: string
+    readonly connectionID: string
+    readonly name: string
+    readonly enabled?: boolean
+    readonly projectID?: string
+    readonly criteria: {
+      readonly issueProjects: ReadonlyArray<string>
+      readonly assignee?: "me" | { readonly id: string }
+      readonly labels?: ReadonlyArray<string>
+      readonly statuses?: ReadonlyArray<string>
+      readonly watchUpdates: boolean
+      readonly escape?: { readonly language: "jql" | "linear-filter" | "github-search"; readonly query: string }
+    }
+    readonly routing: {
+      readonly repoField?: { readonly fieldName: string }
+      readonly mappings: ReadonlyArray<{
+        readonly key: { readonly type: "label" | "component" | "issueProject"; readonly value: string }
+        readonly projectID: string
+      }>
+      readonly fallback: "inbox"
+      readonly workspace:
+        | { readonly type: "branch"; readonly pattern: string }
+        | { readonly type: "current" }
+        | { readonly type: "worktree" }
+    }
+    readonly action: {
+      readonly mode: "inbox" | "awaiting_run" | "run"
+      readonly promptTemplate: string
+      readonly writeback: {
+        readonly comment: boolean
+        readonly transitionOnStart?: string
+        readonly commentOnFailure: boolean
+      }
+    }
+  }["projectID"]
+  readonly criteria: {
+    readonly integrationID: string
+    readonly connectionID: string
+    readonly name: string
+    readonly enabled?: boolean
+    readonly projectID?: string
+    readonly criteria: {
+      readonly issueProjects: ReadonlyArray<string>
+      readonly assignee?: "me" | { readonly id: string }
+      readonly labels?: ReadonlyArray<string>
+      readonly statuses?: ReadonlyArray<string>
+      readonly watchUpdates: boolean
+      readonly escape?: { readonly language: "jql" | "linear-filter" | "github-search"; readonly query: string }
+    }
+    readonly routing: {
+      readonly repoField?: { readonly fieldName: string }
+      readonly mappings: ReadonlyArray<{
+        readonly key: { readonly type: "label" | "component" | "issueProject"; readonly value: string }
+        readonly projectID: string
+      }>
+      readonly fallback: "inbox"
+      readonly workspace:
+        | { readonly type: "branch"; readonly pattern: string }
+        | { readonly type: "current" }
+        | { readonly type: "worktree" }
+    }
+    readonly action: {
+      readonly mode: "inbox" | "awaiting_run" | "run"
+      readonly promptTemplate: string
+      readonly writeback: {
+        readonly comment: boolean
+        readonly transitionOnStart?: string
+        readonly commentOnFailure: boolean
+      }
+    }
+  }["criteria"]
+  readonly routing: {
+    readonly integrationID: string
+    readonly connectionID: string
+    readonly name: string
+    readonly enabled?: boolean
+    readonly projectID?: string
+    readonly criteria: {
+      readonly issueProjects: ReadonlyArray<string>
+      readonly assignee?: "me" | { readonly id: string }
+      readonly labels?: ReadonlyArray<string>
+      readonly statuses?: ReadonlyArray<string>
+      readonly watchUpdates: boolean
+      readonly escape?: { readonly language: "jql" | "linear-filter" | "github-search"; readonly query: string }
+    }
+    readonly routing: {
+      readonly repoField?: { readonly fieldName: string }
+      readonly mappings: ReadonlyArray<{
+        readonly key: { readonly type: "label" | "component" | "issueProject"; readonly value: string }
+        readonly projectID: string
+      }>
+      readonly fallback: "inbox"
+      readonly workspace:
+        | { readonly type: "branch"; readonly pattern: string }
+        | { readonly type: "current" }
+        | { readonly type: "worktree" }
+    }
+    readonly action: {
+      readonly mode: "inbox" | "awaiting_run" | "run"
+      readonly promptTemplate: string
+      readonly writeback: {
+        readonly comment: boolean
+        readonly transitionOnStart?: string
+        readonly commentOnFailure: boolean
+      }
+    }
+  }["routing"]
+  readonly action: {
+    readonly integrationID: string
+    readonly connectionID: string
+    readonly name: string
+    readonly enabled?: boolean
+    readonly projectID?: string
+    readonly criteria: {
+      readonly issueProjects: ReadonlyArray<string>
+      readonly assignee?: "me" | { readonly id: string }
+      readonly labels?: ReadonlyArray<string>
+      readonly statuses?: ReadonlyArray<string>
+      readonly watchUpdates: boolean
+      readonly escape?: { readonly language: "jql" | "linear-filter" | "github-search"; readonly query: string }
+    }
+    readonly routing: {
+      readonly repoField?: { readonly fieldName: string }
+      readonly mappings: ReadonlyArray<{
+        readonly key: { readonly type: "label" | "component" | "issueProject"; readonly value: string }
+        readonly projectID: string
+      }>
+      readonly fallback: "inbox"
+      readonly workspace:
+        | { readonly type: "branch"; readonly pattern: string }
+        | { readonly type: "current" }
+        | { readonly type: "worktree" }
+    }
+    readonly action: {
+      readonly mode: "inbox" | "awaiting_run" | "run"
+      readonly promptTemplate: string
+      readonly writeback: {
+        readonly comment: boolean
+        readonly transitionOnStart?: string
+        readonly commentOnFailure: boolean
+      }
+    }
+  }["action"]
+}
+
+export type IssueWatchersCreateOutput = {
+  readonly id: string
+  readonly integrationID: string
+  readonly connectionID: string
+  readonly name: string
+  readonly enabled: boolean
+  readonly projectID?: string
+  readonly criteria: {
+    readonly issueProjects: ReadonlyArray<string>
+    readonly assignee?: "me" | { readonly id: string }
+    readonly labels?: ReadonlyArray<string>
+    readonly statuses?: ReadonlyArray<string>
+    readonly watchUpdates: boolean
+    readonly escape?: { readonly language: "jql" | "linear-filter" | "github-search"; readonly query: string }
+  }
+  readonly routing: {
+    readonly repoField?: { readonly fieldName: string }
+    readonly mappings: ReadonlyArray<{
+      readonly key: { readonly type: "label" | "component" | "issueProject"; readonly value: string }
+      readonly projectID: string
+    }>
+    readonly fallback: "inbox"
+    readonly workspace:
+      | { readonly type: "branch"; readonly pattern: string }
+      | { readonly type: "current" }
+      | { readonly type: "worktree" }
+  }
+  readonly action: {
+    readonly mode: "inbox" | "awaiting_run" | "run"
+    readonly promptTemplate: string
+    readonly writeback: {
+      readonly comment: boolean
+      readonly transitionOnStart?: string
+      readonly commentOnFailure: boolean
+    }
+  }
+  readonly cursor?: string
+  readonly lastRunAt?: number
+  readonly lastError?: string
+  readonly archivedAt?: number
+  readonly timeCreated: number
+  readonly timeUpdated: number
+}
+
+export type IssueWatchersGetInput = { readonly watcherID: { readonly watcherID: string }["watcherID"] }
+
+export type IssueWatchersGetOutput = {
+  readonly id: string
+  readonly integrationID: string
+  readonly connectionID: string
+  readonly name: string
+  readonly enabled: boolean
+  readonly projectID?: string
+  readonly criteria: {
+    readonly issueProjects: ReadonlyArray<string>
+    readonly assignee?: "me" | { readonly id: string }
+    readonly labels?: ReadonlyArray<string>
+    readonly statuses?: ReadonlyArray<string>
+    readonly watchUpdates: boolean
+    readonly escape?: { readonly language: "jql" | "linear-filter" | "github-search"; readonly query: string }
+  }
+  readonly routing: {
+    readonly repoField?: { readonly fieldName: string }
+    readonly mappings: ReadonlyArray<{
+      readonly key: { readonly type: "label" | "component" | "issueProject"; readonly value: string }
+      readonly projectID: string
+    }>
+    readonly fallback: "inbox"
+    readonly workspace:
+      | { readonly type: "branch"; readonly pattern: string }
+      | { readonly type: "current" }
+      | { readonly type: "worktree" }
+  }
+  readonly action: {
+    readonly mode: "inbox" | "awaiting_run" | "run"
+    readonly promptTemplate: string
+    readonly writeback: {
+      readonly comment: boolean
+      readonly transitionOnStart?: string
+      readonly commentOnFailure: boolean
+    }
+  }
+  readonly cursor?: string
+  readonly lastRunAt?: number
+  readonly lastError?: string
+  readonly archivedAt?: number
+  readonly timeCreated: number
+  readonly timeUpdated: number
+}
+
+export type IssueWatchersUpdateInput = {
+  readonly watcherID: { readonly watcherID: string }["watcherID"]
+  readonly name?: {
+    readonly name?: string
+    readonly projectID?: string
+    readonly criteria?: {
+      readonly issueProjects: ReadonlyArray<string>
+      readonly assignee?: "me" | { readonly id: string }
+      readonly labels?: ReadonlyArray<string>
+      readonly statuses?: ReadonlyArray<string>
+      readonly watchUpdates: boolean
+      readonly escape?: { readonly language: "jql" | "linear-filter" | "github-search"; readonly query: string }
+    }
+    readonly routing?: {
+      readonly repoField?: { readonly fieldName: string }
+      readonly mappings: ReadonlyArray<{
+        readonly key: { readonly type: "label" | "component" | "issueProject"; readonly value: string }
+        readonly projectID: string
+      }>
+      readonly fallback: "inbox"
+      readonly workspace:
+        | { readonly type: "branch"; readonly pattern: string }
+        | { readonly type: "current" }
+        | { readonly type: "worktree" }
+    }
+    readonly action?: {
+      readonly mode: "inbox" | "awaiting_run" | "run"
+      readonly promptTemplate: string
+      readonly writeback: {
+        readonly comment: boolean
+        readonly transitionOnStart?: string
+        readonly commentOnFailure: boolean
+      }
+    }
+    readonly integrationID?: never | null
+    readonly connectionID?: never | null
+  }["name"]
+  readonly projectID?: {
+    readonly name?: string
+    readonly projectID?: string
+    readonly criteria?: {
+      readonly issueProjects: ReadonlyArray<string>
+      readonly assignee?: "me" | { readonly id: string }
+      readonly labels?: ReadonlyArray<string>
+      readonly statuses?: ReadonlyArray<string>
+      readonly watchUpdates: boolean
+      readonly escape?: { readonly language: "jql" | "linear-filter" | "github-search"; readonly query: string }
+    }
+    readonly routing?: {
+      readonly repoField?: { readonly fieldName: string }
+      readonly mappings: ReadonlyArray<{
+        readonly key: { readonly type: "label" | "component" | "issueProject"; readonly value: string }
+        readonly projectID: string
+      }>
+      readonly fallback: "inbox"
+      readonly workspace:
+        | { readonly type: "branch"; readonly pattern: string }
+        | { readonly type: "current" }
+        | { readonly type: "worktree" }
+    }
+    readonly action?: {
+      readonly mode: "inbox" | "awaiting_run" | "run"
+      readonly promptTemplate: string
+      readonly writeback: {
+        readonly comment: boolean
+        readonly transitionOnStart?: string
+        readonly commentOnFailure: boolean
+      }
+    }
+    readonly integrationID?: never | null
+    readonly connectionID?: never | null
+  }["projectID"]
+  readonly criteria?: {
+    readonly name?: string
+    readonly projectID?: string
+    readonly criteria?: {
+      readonly issueProjects: ReadonlyArray<string>
+      readonly assignee?: "me" | { readonly id: string }
+      readonly labels?: ReadonlyArray<string>
+      readonly statuses?: ReadonlyArray<string>
+      readonly watchUpdates: boolean
+      readonly escape?: { readonly language: "jql" | "linear-filter" | "github-search"; readonly query: string }
+    }
+    readonly routing?: {
+      readonly repoField?: { readonly fieldName: string }
+      readonly mappings: ReadonlyArray<{
+        readonly key: { readonly type: "label" | "component" | "issueProject"; readonly value: string }
+        readonly projectID: string
+      }>
+      readonly fallback: "inbox"
+      readonly workspace:
+        | { readonly type: "branch"; readonly pattern: string }
+        | { readonly type: "current" }
+        | { readonly type: "worktree" }
+    }
+    readonly action?: {
+      readonly mode: "inbox" | "awaiting_run" | "run"
+      readonly promptTemplate: string
+      readonly writeback: {
+        readonly comment: boolean
+        readonly transitionOnStart?: string
+        readonly commentOnFailure: boolean
+      }
+    }
+    readonly integrationID?: never | null
+    readonly connectionID?: never | null
+  }["criteria"]
+  readonly routing?: {
+    readonly name?: string
+    readonly projectID?: string
+    readonly criteria?: {
+      readonly issueProjects: ReadonlyArray<string>
+      readonly assignee?: "me" | { readonly id: string }
+      readonly labels?: ReadonlyArray<string>
+      readonly statuses?: ReadonlyArray<string>
+      readonly watchUpdates: boolean
+      readonly escape?: { readonly language: "jql" | "linear-filter" | "github-search"; readonly query: string }
+    }
+    readonly routing?: {
+      readonly repoField?: { readonly fieldName: string }
+      readonly mappings: ReadonlyArray<{
+        readonly key: { readonly type: "label" | "component" | "issueProject"; readonly value: string }
+        readonly projectID: string
+      }>
+      readonly fallback: "inbox"
+      readonly workspace:
+        | { readonly type: "branch"; readonly pattern: string }
+        | { readonly type: "current" }
+        | { readonly type: "worktree" }
+    }
+    readonly action?: {
+      readonly mode: "inbox" | "awaiting_run" | "run"
+      readonly promptTemplate: string
+      readonly writeback: {
+        readonly comment: boolean
+        readonly transitionOnStart?: string
+        readonly commentOnFailure: boolean
+      }
+    }
+    readonly integrationID?: never | null
+    readonly connectionID?: never | null
+  }["routing"]
+  readonly action?: {
+    readonly name?: string
+    readonly projectID?: string
+    readonly criteria?: {
+      readonly issueProjects: ReadonlyArray<string>
+      readonly assignee?: "me" | { readonly id: string }
+      readonly labels?: ReadonlyArray<string>
+      readonly statuses?: ReadonlyArray<string>
+      readonly watchUpdates: boolean
+      readonly escape?: { readonly language: "jql" | "linear-filter" | "github-search"; readonly query: string }
+    }
+    readonly routing?: {
+      readonly repoField?: { readonly fieldName: string }
+      readonly mappings: ReadonlyArray<{
+        readonly key: { readonly type: "label" | "component" | "issueProject"; readonly value: string }
+        readonly projectID: string
+      }>
+      readonly fallback: "inbox"
+      readonly workspace:
+        | { readonly type: "branch"; readonly pattern: string }
+        | { readonly type: "current" }
+        | { readonly type: "worktree" }
+    }
+    readonly action?: {
+      readonly mode: "inbox" | "awaiting_run" | "run"
+      readonly promptTemplate: string
+      readonly writeback: {
+        readonly comment: boolean
+        readonly transitionOnStart?: string
+        readonly commentOnFailure: boolean
+      }
+    }
+    readonly integrationID?: never | null
+    readonly connectionID?: never | null
+  }["action"]
+  readonly integrationID?: {
+    readonly name?: string
+    readonly projectID?: string
+    readonly criteria?: {
+      readonly issueProjects: ReadonlyArray<string>
+      readonly assignee?: "me" | { readonly id: string }
+      readonly labels?: ReadonlyArray<string>
+      readonly statuses?: ReadonlyArray<string>
+      readonly watchUpdates: boolean
+      readonly escape?: { readonly language: "jql" | "linear-filter" | "github-search"; readonly query: string }
+    }
+    readonly routing?: {
+      readonly repoField?: { readonly fieldName: string }
+      readonly mappings: ReadonlyArray<{
+        readonly key: { readonly type: "label" | "component" | "issueProject"; readonly value: string }
+        readonly projectID: string
+      }>
+      readonly fallback: "inbox"
+      readonly workspace:
+        | { readonly type: "branch"; readonly pattern: string }
+        | { readonly type: "current" }
+        | { readonly type: "worktree" }
+    }
+    readonly action?: {
+      readonly mode: "inbox" | "awaiting_run" | "run"
+      readonly promptTemplate: string
+      readonly writeback: {
+        readonly comment: boolean
+        readonly transitionOnStart?: string
+        readonly commentOnFailure: boolean
+      }
+    }
+    readonly integrationID?: never | null
+    readonly connectionID?: never | null
+  }["integrationID"]
+  readonly connectionID?: {
+    readonly name?: string
+    readonly projectID?: string
+    readonly criteria?: {
+      readonly issueProjects: ReadonlyArray<string>
+      readonly assignee?: "me" | { readonly id: string }
+      readonly labels?: ReadonlyArray<string>
+      readonly statuses?: ReadonlyArray<string>
+      readonly watchUpdates: boolean
+      readonly escape?: { readonly language: "jql" | "linear-filter" | "github-search"; readonly query: string }
+    }
+    readonly routing?: {
+      readonly repoField?: { readonly fieldName: string }
+      readonly mappings: ReadonlyArray<{
+        readonly key: { readonly type: "label" | "component" | "issueProject"; readonly value: string }
+        readonly projectID: string
+      }>
+      readonly fallback: "inbox"
+      readonly workspace:
+        | { readonly type: "branch"; readonly pattern: string }
+        | { readonly type: "current" }
+        | { readonly type: "worktree" }
+    }
+    readonly action?: {
+      readonly mode: "inbox" | "awaiting_run" | "run"
+      readonly promptTemplate: string
+      readonly writeback: {
+        readonly comment: boolean
+        readonly transitionOnStart?: string
+        readonly commentOnFailure: boolean
+      }
+    }
+    readonly integrationID?: never | null
+    readonly connectionID?: never | null
+  }["connectionID"]
+}
+
+export type IssueWatchersUpdateOutput = {
+  readonly id: string
+  readonly integrationID: string
+  readonly connectionID: string
+  readonly name: string
+  readonly enabled: boolean
+  readonly projectID?: string
+  readonly criteria: {
+    readonly issueProjects: ReadonlyArray<string>
+    readonly assignee?: "me" | { readonly id: string }
+    readonly labels?: ReadonlyArray<string>
+    readonly statuses?: ReadonlyArray<string>
+    readonly watchUpdates: boolean
+    readonly escape?: { readonly language: "jql" | "linear-filter" | "github-search"; readonly query: string }
+  }
+  readonly routing: {
+    readonly repoField?: { readonly fieldName: string }
+    readonly mappings: ReadonlyArray<{
+      readonly key: { readonly type: "label" | "component" | "issueProject"; readonly value: string }
+      readonly projectID: string
+    }>
+    readonly fallback: "inbox"
+    readonly workspace:
+      | { readonly type: "branch"; readonly pattern: string }
+      | { readonly type: "current" }
+      | { readonly type: "worktree" }
+  }
+  readonly action: {
+    readonly mode: "inbox" | "awaiting_run" | "run"
+    readonly promptTemplate: string
+    readonly writeback: {
+      readonly comment: boolean
+      readonly transitionOnStart?: string
+      readonly commentOnFailure: boolean
+    }
+  }
+  readonly cursor?: string
+  readonly lastRunAt?: number
+  readonly lastError?: string
+  readonly archivedAt?: number
+  readonly timeCreated: number
+  readonly timeUpdated: number
+}
+
+export type IssueWatchersArchiveInput = { readonly watcherID: { readonly watcherID: string }["watcherID"] }
+
+export type IssueWatchersArchiveOutput = void
+
+export type IssueWatchersEnableInput = {
+  readonly watcherID: { readonly watcherID: string }["watcherID"]
+  readonly enabled: { readonly enabled: boolean }["enabled"]
+}
+
+export type IssueWatchersEnableOutput = {
+  readonly id: string
+  readonly integrationID: string
+  readonly connectionID: string
+  readonly name: string
+  readonly enabled: boolean
+  readonly projectID?: string
+  readonly criteria: {
+    readonly issueProjects: ReadonlyArray<string>
+    readonly assignee?: "me" | { readonly id: string }
+    readonly labels?: ReadonlyArray<string>
+    readonly statuses?: ReadonlyArray<string>
+    readonly watchUpdates: boolean
+    readonly escape?: { readonly language: "jql" | "linear-filter" | "github-search"; readonly query: string }
+  }
+  readonly routing: {
+    readonly repoField?: { readonly fieldName: string }
+    readonly mappings: ReadonlyArray<{
+      readonly key: { readonly type: "label" | "component" | "issueProject"; readonly value: string }
+      readonly projectID: string
+    }>
+    readonly fallback: "inbox"
+    readonly workspace:
+      | { readonly type: "branch"; readonly pattern: string }
+      | { readonly type: "current" }
+      | { readonly type: "worktree" }
+  }
+  readonly action: {
+    readonly mode: "inbox" | "awaiting_run" | "run"
+    readonly promptTemplate: string
+    readonly writeback: {
+      readonly comment: boolean
+      readonly transitionOnStart?: string
+      readonly commentOnFailure: boolean
+    }
+  }
+  readonly cursor?: string
+  readonly lastRunAt?: number
+  readonly lastError?: string
+  readonly archivedAt?: number
+  readonly timeCreated: number
+  readonly timeUpdated: number
+}
 
 export type LocationGetInput = {
   readonly location?: {
@@ -262,6 +1045,15 @@ export type SessionsListOutput = {
         readonly patch: string
       }>
     }
+    readonly provenance?: {
+      readonly type: "issue"
+      readonly integrationID: string
+      readonly externalKey: string
+      readonly externalUrl: string
+      readonly watcherID?: string
+      readonly watcherName: string
+      readonly branch?: string
+    }
   }>
   readonly cursor: { readonly previous?: string | null; readonly next?: string | null }
 }
@@ -324,6 +1116,15 @@ export type SessionsCreateOutput = {
         readonly patch: string
       }>
     }
+    readonly provenance?: {
+      readonly type: "issue"
+      readonly integrationID: string
+      readonly externalKey: string
+      readonly externalUrl: string
+      readonly watcherID?: string
+      readonly watcherName: string
+      readonly branch?: string
+    }
   }
 }["data"]
 
@@ -361,6 +1162,15 @@ export type SessionsGetOutput = {
         readonly deletions: number
         readonly patch: string
       }>
+    }
+    readonly provenance?: {
+      readonly type: "issue"
+      readonly integrationID: string
+      readonly externalKey: string
+      readonly externalUrl: string
+      readonly watcherID?: string
+      readonly watcherName: string
+      readonly branch?: string
     }
   }
 }["data"]

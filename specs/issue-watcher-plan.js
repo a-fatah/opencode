@@ -2,7 +2,7 @@
 window.ISSUE_WATCHER_PLAN = {
   title: "Issue Watcher Delivery Map",
   version: 1,
-  updatedAt: "2026-07-29",
+  updatedAt: "2026-07-30",
   sourceSpec: "issue-watcher.md",
   status: "in_progress",
   statusDefinitions: {
@@ -211,7 +211,7 @@ window.ISSUE_WATCHER_PLAN = {
       id: "wave-5",
       number: 5,
       name: "Session Foundations",
-      status: "planned",
+      status: "complete",
       dependsOn: ["wave-3"],
       specSlices: ["Slice 6", "Slice 7"],
       objective: "Build safe awaiting-run execution and workspace provisioning as independent foundations.",
@@ -219,7 +219,7 @@ window.ISSUE_WATCHER_PLAN = {
       lanes: [
         {
           name: "Awaiting-run execution",
-          status: "planned",
+          status: "complete",
           work: [
             "Durable pending-input replace, cancel, claim, and tombstone events",
             "Execution-attempt IDs and idempotent non-blocking resume",
@@ -229,7 +229,7 @@ window.ISSUE_WATCHER_PLAN = {
         },
         {
           name: "Workspace provisioning",
-          status: "planned",
+          status: "complete",
           work: [
             "Global WorkspaceProvisioner contract",
             "Two-phase deterministic reserve and provision lifecycle",

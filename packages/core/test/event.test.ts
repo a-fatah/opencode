@@ -12,7 +12,7 @@ import { EventSequenceTable, EventTable } from "@opencode-ai/core/event/sql"
 import { Location } from "@opencode-ai/core/location"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { WorkspaceV2 } from "@opencode-ai/core/workspace"
-import { eq } from "drizzle-orm"
+import { asc, eq } from "drizzle-orm"
 import { location } from "./fixture/location"
 import { testEffect } from "./lib/effect"
 
@@ -391,6 +391,7 @@ describe("EventV2", () => {
         .select()
         .from(EventTable)
         .where(eq(EventTable.aggregate_id, aggregateID))
+        .orderBy(asc(EventTable.seq))
         .all()
         .pipe(Effect.orDie)
 
@@ -416,6 +417,168 @@ describe("EventV2", () => {
         .pipe(Effect.orDie)
 
       expect(rows.map((row) => row.seq)).toEqual([0, 1])
+    }),
+  )
+
+  it.effect("atomically publishes a same-aggregate durable batch in sequence order", () =>
+    Effect.gen(function* () {
+      const events = yield* EventV2.Service
+      const { db } = yield* Database.Service
+      const aggregateID = EventV2.ID.create()
+      const observed = new Array<[string, number]>()
+      yield* events.publish(SyncMessage, { id: aggregateID, text: "seed" })
+      yield* events.listen((event) =>
+        db
+          .select({ seq: EventSequenceTable.seq })
+          .from(EventSequenceTable)
+          .where(eq(EventSequenceTable.aggregate_id, aggregateID))
+          .get()
+          .pipe(
+            Effect.orDie,
+            Effect.tap((row) => Effect.sync(() => observed.push([event.type, row?.seq ?? -1]))),
+            Effect.asVoid,
+          ),
+      )
+
+      const published = yield* events.publishBatch([
+        { definition: SyncMessage, data: { id: aggregateID, text: "claimed" } },
+        { definition: SyncSent, data: { messageID: aggregateID, text: "scheduled" } },
+      ])
+
+      expect(published.map((event) => event.durable?.seq)).toEqual([1, 2])
+      expect(observed).toEqual([
+        [SyncMessage.type, 2],
+        [SyncSent.type, 2],
+      ])
+    }),
+  )
+
+  it.effect("serializes concurrent durable batches without interleaving", () =>
+    Effect.gen(function* () {
+      const events = yield* EventV2.Service
+      const aggregateID = EventV2.ID.create()
+
+      yield* Effect.all(
+        Array.from({ length: 8 }, (_, index) =>
+          events.publishBatch([
+            { definition: SyncMessage, data: { id: aggregateID, text: `${index}:claim` } },
+            { definition: SyncSent, data: { messageID: aggregateID, text: `${index}:schedule` } },
+          ]),
+        ),
+        { concurrency: "unbounded" },
+      )
+      const rows = yield* (yield* Database.Service).db
+        .select()
+        .from(EventTable)
+        .where(eq(EventTable.aggregate_id, aggregateID))
+        .orderBy(asc(EventTable.seq))
+        .all()
+        .pipe(Effect.orDie)
+
+      expect(rows.map((row) => row.seq)).toEqual(Array.from({ length: 16 }, (_, index) => index))
+      expect(Array.from({ length: 8 }, (_, index) => rows.slice(index * 2, index * 2 + 2).map((row) => row.type))).toEqual(
+        Array.from({ length: 8 }, () => [
+          EventV2.versionedType(SyncMessage.type, 1),
+          EventV2.versionedType(SyncSent.type, 1),
+        ]),
+      )
+    }),
+  )
+
+  it.effect("rolls back an entire batch when an event id is duplicated", () =>
+    Effect.gen(function* () {
+      const events = yield* EventV2.Service
+      const { db } = yield* Database.Service
+      const aggregateID = EventV2.ID.create()
+      const id = EventV2.ID.create()
+      yield* events.publish(SyncMessage, { id: aggregateID, text: "seed" }, { id })
+
+      const exit = yield* events
+        .publishBatch([
+          { definition: SyncMessage, data: { id: aggregateID, text: "new" } },
+          { definition: SyncSent, data: { messageID: aggregateID, text: "duplicate" }, options: { id } },
+        ])
+        .pipe(Effect.exit)
+
+      expect(String(exit)).toContain(`Event ${id} already exists`)
+      expect((yield* db.select().from(EventTable).where(eq(EventTable.aggregate_id, aggregateID)).all())).toHaveLength(1)
+    }),
+  )
+
+  it.effect("notifies listeners only after the complete batch commits", () =>
+    Effect.gen(function* () {
+      const events = yield* EventV2.Service
+      const { db } = yield* Database.Service
+      const aggregateID = EventV2.ID.create()
+      const observed = new Array<number>()
+      yield* events.listen(() =>
+        db.select().from(EventTable).where(eq(EventTable.aggregate_id, aggregateID)).all().pipe(
+          Effect.orDie,
+          Effect.tap((rows) => Effect.sync(() => observed.push(rows.length))),
+          Effect.asVoid,
+        ),
+      )
+
+      yield* events.publishBatch([
+        { definition: SyncMessage, data: { id: aggregateID, text: "one" } },
+        { definition: SyncSent, data: { messageID: aggregateID, text: "two" } },
+      ])
+
+      expect(observed).toEqual([2, 2])
+    }),
+  )
+
+  it.effect("rolls back every event and projector when a durable batch commit fails", () =>
+    Effect.gen(function* () {
+      const events = yield* EventV2.Service
+      const { db } = yield* Database.Service
+      const aggregateID = EventV2.ID.create()
+      const observed = new Array<EventV2.Payload>()
+      yield* db.run("CREATE TABLE IF NOT EXISTS event_batch_probe (value text NOT NULL)")
+      yield* db.run("DELETE FROM event_batch_probe")
+      yield* events.listen((event) => Effect.sync(() => observed.push(event)))
+      yield* events.project(SyncMessage, () =>
+        db.run("INSERT INTO event_batch_probe (value) VALUES ('projected')").pipe(Effect.orDie, Effect.asVoid),
+      )
+
+      const exit = yield* events
+        .publishBatch([
+          { definition: SyncMessage, data: { id: aggregateID, text: "claimed" } },
+          {
+            definition: SyncSent,
+            data: { messageID: aggregateID, text: "scheduled" },
+            options: { commit: () => Effect.die("batch commit failed") },
+          },
+        ])
+        .pipe(Effect.exit)
+
+      expect(String(exit)).toContain("batch commit failed")
+      expect(observed).toEqual([])
+      expect(yield* db.all("SELECT value FROM event_batch_probe")).toEqual([])
+      expect(yield* db.select().from(EventTable).where(eq(EventTable.aggregate_id, aggregateID)).all()).toEqual([])
+      expect(
+        yield* db.select().from(EventSequenceTable).where(eq(EventSequenceTable.aggregate_id, aggregateID)).all(),
+      ).toEqual([])
+    }),
+  )
+
+  it.effect("rejects durable batches spanning aggregates without committing", () =>
+    Effect.gen(function* () {
+      const events = yield* EventV2.Service
+      const { db } = yield* Database.Service
+      const first = EventV2.ID.create()
+      const second = EventV2.ID.create()
+
+      const exit = yield* events
+        .publishBatch([
+          { definition: SyncMessage, data: { id: first, text: "claimed" } },
+          { definition: SyncSent, data: { messageID: second, text: "scheduled" } },
+        ])
+        .pipe(Effect.exit)
+
+      expect(String(exit)).toContain("Batch events must belong to the same aggregate")
+      expect(yield* db.select().from(EventTable).where(eq(EventTable.aggregate_id, first)).all()).toEqual([])
+      expect(yield* db.select().from(EventTable).where(eq(EventTable.aggregate_id, second)).all()).toEqual([])
     }),
   )
 

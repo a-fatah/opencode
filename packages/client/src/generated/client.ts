@@ -50,6 +50,16 @@ import type {
   SessionsSwitchModelOutput,
   SessionsPromptInput,
   SessionsPromptOutput,
+  SessionsPendingInput,
+  SessionsPendingOutput,
+  SessionsReplaceInput,
+  SessionsReplaceOutput,
+  SessionsCancelInput,
+  SessionsCancelOutput,
+  SessionsConfirmInput,
+  SessionsConfirmOutput,
+  SessionsResumeInput,
+  SessionsResumeOutput,
   SessionsCompactInput,
   SessionsCompactOutput,
   SessionsWaitInput,
@@ -666,6 +676,64 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ).then((value) => value.data),
+      pending: (input: SessionsPendingInput, requestOptions?: RequestOptions) =>
+        request<SessionsPendingOutput>(
+          {
+            method: "GET",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/input/pending`,
+            successStatus: 200,
+            declaredStatuses: [404, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      replace: (input: SessionsReplaceInput, requestOptions?: RequestOptions) =>
+        request<SessionsReplaceOutput>(
+          {
+            method: "PUT",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/input/${encodeURIComponent(input.messageID)}`,
+            body: { prompt: input["prompt"] },
+            successStatus: 200,
+            declaredStatuses: [404, 409, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      cancel: (input: SessionsCancelInput, requestOptions?: RequestOptions) =>
+        request<SessionsCancelOutput>(
+          {
+            method: "DELETE",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/input/${encodeURIComponent(input.messageID)}`,
+            successStatus: 204,
+            declaredStatuses: [404, 409, 400, 401],
+            empty: true,
+          },
+          requestOptions,
+        ),
+      confirm: (input: SessionsConfirmInput, requestOptions?: RequestOptions) =>
+        request<SessionsConfirmOutput>(
+          {
+            method: "POST",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/resume/confirm`,
+            body: { attemptID: input["attemptID"], newAttemptID: input["newAttemptID"] },
+            successStatus: 202,
+            declaredStatuses: [404, 409, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      resume: (input: SessionsResumeInput, requestOptions?: RequestOptions) =>
+        request<SessionsResumeOutput>(
+          {
+            method: "POST",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/resume`,
+            body: { expectedMessageID: input["expectedMessageID"], attemptID: input["attemptID"] },
+            successStatus: 202,
+            declaredStatuses: [404, 409, 500, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
       compact: (input: SessionsCompactInput, requestOptions?: RequestOptions) =>
         request<SessionsCompactOutput>(
           {

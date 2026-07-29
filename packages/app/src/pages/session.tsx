@@ -56,7 +56,7 @@ import { useServerSDK } from "@/context/server-sdk"
 import { ServerConnection, serverName, useServer } from "@/context/server"
 import { useSettings } from "@/context/settings"
 import { useSync } from "@/context/sync"
-import { useTabs } from "@/context/tabs"
+import { tabKey, useTabs } from "@/context/tabs"
 import { TerminalProvider, useTerminal } from "@/context/terminal"
 import { PromptInput } from "@/components/prompt-input"
 import { PromptInputV2Composer, usePromptInputV2Controller } from "@/components/prompt-input-v2"
@@ -103,6 +103,9 @@ import { legacySessionHref, requireServerKey, sessionHref } from "@/utils/sessio
 import { useUsageExceededDialogs } from "./session/usage-exceeded-dialogs"
 import { createSessionOwnership } from "./session/session-ownership"
 import { createSessionLineage } from "./session/session-lineage"
+import { AwaitingRunPanel } from "./session/awaiting-run-panel"
+import { awaitingRunVisible, type AwaitingRunState } from "./session/awaiting-run"
+import { sessionStatus } from "@/utils/session"
 
 type FollowupItem = FollowupDraft & { id: string }
 type FollowupEdit = Pick<FollowupItem, "id" | "prompt" | "context">
@@ -367,6 +370,7 @@ export default function Page() {
   const comments = useComments()
   const command = useCommand()
   const terminal = useTerminal()
+  const appTabs = useTabs()
   const [searchParams, setSearchParams] = useSearchParams<{ prompt?: string }>()
   const location = useLocation()
   const navigate = useNavigate()
@@ -532,6 +536,7 @@ export default function Page() {
   }
 
   const info = createMemo(() => (params.id ? sync().session.get(params.id) : undefined))
+  const awaitingStatus = createMemo(() => sessionStatus(info()))
   const isChildSession = createMemo(() => !!info()?.parentID)
   const canReview = createMemo(() => !!sync().project)
   const reviewTab = createMemo(() => isDesktop())
@@ -2124,7 +2129,34 @@ export default function Page() {
         </Switch>
       </div>
 
-      <Show when={(params.id || !newSessionDesign()) && !mobileChanges()}>
+      <Show when={params.id && awaitingRunVisible(awaitingStatus()) && !mobileChanges() ? params.id : undefined} keyed>
+        {(sessionID) => {
+          const tab = {
+            type: "session" as const,
+            server: ServerConnection.key(serverSDK().server),
+            sessionId: sessionID,
+          }
+          const state = appTabs.state(tab, "awaiting-run", () =>
+            createStore<AwaitingRunState>({ locked: awaitingStatus() === "handoff_unknown" }),
+          )
+          return (
+            <AwaitingRunPanel
+              sessionID={sessionID}
+              status={awaitingStatus()!}
+              serverSDK={serverSDK()}
+              fetch={platform.fetch}
+              state={state}
+              retry={() => appTabs.info[tabKey(tab)]?.awaitingRun ?? {}}
+              setRetry={(retry) => appTabs.rememberAwaitingRun(tab, retry)}
+              retryReady={appTabs.infoReady()}
+              current={prompt.current}
+              setPrompt={prompt.set}
+              refreshSession={() => serverSync().session.resolve(sessionID, { force: true })}
+            />
+          )
+        }}
+      </Show>
+      <Show when={(params.id || !newSessionDesign()) && !mobileChanges() && !awaitingRunVisible(awaitingStatus())}>
         {(_) => {
           const controller = createSessionComposerRegionController({
             state: composer,

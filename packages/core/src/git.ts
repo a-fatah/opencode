@@ -82,9 +82,13 @@ export interface Interface {
   }
   readonly history: {
     readonly head: (repository: Repository) => Effect.Effect<string | undefined>
+    readonly revision: (repository: Repository, revision: string) => Effect.Effect<string | undefined>
     readonly branch: (repository: Repository) => Effect.Effect<string | undefined>
     readonly defaultRemoteBranch: (repository: Repository, remote?: string) => Effect.Effect<string | undefined>
     readonly rootCommits: (repository: Repository) => Effect.Effect<readonly string[]>
+    readonly revisionExists: (repository: Repository, revision: string) => Effect.Effect<boolean>
+    readonly branchExists: (repository: Repository, branch: string) => Effect.Effect<boolean>
+    readonly branchValid: (repository: Repository, branch: string) => Effect.Effect<boolean>
   }
   readonly sync: {
     readonly fetchRemotes: (repository: Repository, input?: { prune?: boolean }) => Effect.Effect<void, OperationError>
@@ -97,8 +101,13 @@ export interface Interface {
       input: { remote?: string; branch: string; reset?: boolean },
     ) => Effect.Effect<void, OperationError>
     readonly resetHard: (repository: Repository, revision: string) => Effect.Effect<void, OperationError>
+    readonly createBranch: (repository: Repository, branch: string, revision: string) => Effect.Effect<void, OperationError>
+    readonly deleteBranch: (repository: Repository, branch: string) => Effect.Effect<void, OperationError>
+    readonly checkoutBranch: (repository: Repository, branch: string) => Effect.Effect<void, OperationError>
+    readonly checkoutDetached: (repository: Repository, revision: string) => Effect.Effect<void, OperationError>
   }
   readonly change: {
+    readonly clean: (repository: Repository) => Effect.Effect<boolean>
     readonly capture: (input: { repository: Repository; path: AbsolutePath }) => Effect.Effect<ChangeSet, PatchError>
     readonly apply: (input: {
       repository: Repository
@@ -116,6 +125,8 @@ export interface Interface {
     readonly create: (input: {
       repository: Repository
       directory: AbsolutePath
+      revision?: string
+      branch?: string
     }) => Effect.Effect<Repository, WorktreeError>
     readonly remove: (input: {
       repository: Repository
@@ -234,10 +245,31 @@ const layer = Layer.effect(
       return result.text.trim() || undefined
     })
 
+    const revision = Effect.fn("Git.history.revision")(function* (repository: Repository, value: string) {
+      const result = yield* run(repository.worktree, proc)(["rev-parse", "--verify", `${value}^{commit}`])
+      if (result.exitCode !== 0) return undefined
+      return result.text.trim() || undefined
+    })
+
     const branch = Effect.fn("Git.history.branch")(function* (repository: Repository) {
       const result = yield* run(repository.worktree, proc)(["symbolic-ref", "--quiet", "--short", "HEAD"])
       if (result.exitCode !== 0) return undefined
       return result.text.trim() || undefined
+    })
+
+    const revisionExists = Effect.fn("Git.history.revisionExists")(function* (
+      repository: Repository,
+      revision: string,
+    ) {
+      return (yield* run(repository.worktree, proc)(["rev-parse", "--verify", `${revision}^{commit}`])).exitCode === 0
+    })
+
+    const branchExists = Effect.fn("Git.history.branchExists")(function* (repository: Repository, name: string) {
+      return (yield* run(repository.worktree, proc)(["show-ref", "--verify", "--quiet", `refs/heads/${name}`])).exitCode === 0
+    })
+
+    const branchValid = Effect.fn("Git.history.branchValid")(function* (repository: Repository, name: string) {
+      return (yield* run(repository.worktree, proc)(["check-ref-format", "--branch", name])).exitCode === 0
     })
 
     const remoteHead = Effect.fn("Git.history.defaultRemoteBranch")(function* (
@@ -321,6 +353,34 @@ const layer = Layer.effect(
 
     const reset = Effect.fn("Git.sync.resetHard")(function* (repository: Repository, revision: string) {
       yield* operation("reset", repository.worktree, ["reset", "--hard", revision])
+    })
+
+    const createBranch = Effect.fn("Git.sync.createBranch")(function* (
+      repository: Repository,
+      name: string,
+      revision: string,
+    ) {
+      yield* operation("checkout", repository.worktree, ["checkout", "-b", name, revision])
+    })
+
+    const deleteBranch = Effect.fn("Git.sync.deleteBranch")(function* (repository: Repository, name: string) {
+      yield* operation("checkout", repository.worktree, ["branch", "-D", name])
+    })
+
+    const checkoutBranch = Effect.fn("Git.sync.checkoutBranch")(function* (repository: Repository, name: string) {
+      yield* operation("checkout", repository.worktree, ["checkout", name])
+    })
+
+    const checkoutDetached = Effect.fn("Git.sync.checkoutDetached")(function* (
+      repository: Repository,
+      revision: string,
+    ) {
+      yield* operation("checkout", repository.worktree, ["checkout", "--detach", revision])
+    })
+
+    const clean = Effect.fn("Git.change.clean")(function* (repository: Repository) {
+      const result = yield* run(repository.worktree, proc)(["status", "--porcelain", "--untracked-files=normal"])
+      return result.exitCode === 0 && result.text.length === 0
     })
 
     const repositoryArgs = (repository: Repository, args: string[]) => [
@@ -889,11 +949,19 @@ const layer = Layer.effect(
     const worktreeCreate = Effect.fn("Git.worktree.create")(function* (input: {
       repository: Repository
       directory: AbsolutePath
+      revision?: string
+      branch?: string
     }) {
       yield* worktreeRun(
         "create",
         input.repository,
-        ["worktree", "add", "--detach", input.directory, "HEAD"],
+        [
+          "worktree",
+          "add",
+          ...(input.branch ? ["-b", input.branch] : ["--detach"]),
+          input.directory,
+          input.revision ?? "HEAD",
+        ],
         input.directory,
       )
       const repository = yield* discover(input.directory)
@@ -935,9 +1003,27 @@ const layer = Layer.effect(
     return Service.of({
       repo: { discover, clone, create },
       remote: { get: remote, list: remotes },
-      history: { head, branch, defaultRemoteBranch: remoteHead, rootCommits: roots },
-      sync: { fetchRemotes: fetch, fetchBranch, checkoutRemoteBranch: checkout, resetHard: reset },
-      change: { capture, apply, discard },
+      history: {
+        head,
+        revision,
+        branch,
+        defaultRemoteBranch: remoteHead,
+        rootCommits: roots,
+        revisionExists,
+        branchExists,
+        branchValid,
+      },
+      sync: {
+        fetchRemotes: fetch,
+        fetchBranch,
+        checkoutRemoteBranch: checkout,
+        resetHard: reset,
+        createBranch,
+        deleteBranch,
+        checkoutBranch,
+        checkoutDetached,
+      },
+      change: { clean, capture, apply, discard },
       worktree: { create: worktreeCreate, remove: worktreeRemove, list: worktreeList },
       index: { refresh, ignored },
       tree: {

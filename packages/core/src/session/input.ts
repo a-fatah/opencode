@@ -2,7 +2,8 @@ export * as SessionInput from "./input"
 
 import { and, asc, eq, isNull, lte } from "drizzle-orm"
 import { DateTime, Effect, Schema } from "effect"
-import { Admitted, Delivery } from "@opencode-ai/schema/session-input"
+import { Admitted, Delivery, Pending } from "@opencode-ai/schema/session-input"
+import { SessionExecutionAttempt } from "@opencode-ai/schema/session-execution-attempt"
 import type { Database } from "../database/database"
 import type { EventV2 } from "../event"
 import { SessionEvent } from "./event"
@@ -27,6 +28,20 @@ const fromRow = (row: typeof SessionInputTable.$inferSelect): Admitted =>
     delivery: row.delivery,
     timeCreated: DateTime.makeUnsafe(row.time_created),
     ...(row.promoted_seq === null ? {} : { promotedSeq: row.promoted_seq }),
+    ...(row.time_updated === null ? {} : { timeUpdated: DateTime.makeUnsafe(row.time_updated) }),
+    ...(row.cancelled_at === null ? {} : { cancelledAt: DateTime.makeUnsafe(row.cancelled_at) }),
+    ...(row.claimed_attempt_id === null ? {} : { claimedAttemptID: row.claimed_attempt_id }),
+  })
+
+const toPending = (row: typeof SessionInputTable.$inferSelect): Pending =>
+  Pending.make({
+    admittedSeq: row.admitted_seq,
+    id: SessionMessage.ID.make(row.id),
+    sessionID: SessionSchema.ID.make(row.session_id),
+    prompt: decodePrompt(row.prompt),
+    delivery: row.delivery,
+    timeCreated: DateTime.makeUnsafe(row.time_created),
+    ...(row.time_updated === null ? {} : { timeUpdated: DateTime.makeUnsafe(row.time_updated) }),
   })
 
 export const find = Effect.fn("SessionInput.find")(function* (db: DatabaseService, id: SessionMessage.ID) {
@@ -34,9 +49,144 @@ export const find = Effect.fn("SessionInput.find")(function* (db: DatabaseServic
   return row === undefined ? undefined : fromRow(row)
 })
 
+export const pending = Effect.fn("SessionInput.pending")(function* (db: DatabaseService, sessionID: SessionSchema.ID) {
+  const rows = yield* db
+    .select()
+    .from(SessionInputTable)
+    .where(
+      and(
+        eq(SessionInputTable.session_id, sessionID),
+        isNull(SessionInputTable.promoted_seq),
+        isNull(SessionInputTable.cancelled_at),
+        isNull(SessionInputTable.claimed_attempt_id),
+      ),
+    )
+    .orderBy(asc(SessionInputTable.admitted_seq))
+    .all()
+    .pipe(Effect.orDie)
+  return rows.map(toPending)
+})
+
+export const replace = Effect.fn("SessionInput.replace")(function* (
+  db: DatabaseService,
+  events: EventV2.Interface,
+  input: { readonly sessionID: SessionSchema.ID; readonly messageID: SessionMessage.ID; readonly prompt: Prompt },
+) {
+  const stored = yield* find(db, input.messageID)
+  if (!stored || stored.sessionID !== input.sessionID) return undefined
+  if (stored.promotedSeq !== undefined || stored.cancelledAt || stored.claimedAttemptID)
+    return yield* Effect.die(
+      new LifecycleConflict({
+        id: input.messageID,
+        state: stored.promotedSeq !== undefined ? "promoted" : stored.cancelledAt ? "cancelled" : "claimed",
+      }),
+    )
+  const timestamp = yield* DateTime.now
+  yield* events.publish(SessionEvent.PromptReplaced, {
+    sessionID: input.sessionID,
+    messageID: input.messageID,
+    timestamp,
+    prompt: input.prompt,
+    delivery: stored.delivery,
+  })
+  return Admitted.make({ ...stored, prompt: input.prompt, timeUpdated: timestamp })
+})
+
+export const cancel = Effect.fn("SessionInput.cancel")(function* (
+  db: DatabaseService,
+  events: EventV2.Interface,
+  sessionID: SessionSchema.ID,
+  messageID: SessionMessage.ID,
+) {
+  const stored = yield* find(db, messageID)
+  if (!stored || stored.sessionID !== sessionID) return false
+  if (stored.promotedSeq !== undefined || stored.cancelledAt || stored.claimedAttemptID)
+    return yield* Effect.die(
+      new LifecycleConflict({
+        id: messageID,
+        state: stored.promotedSeq !== undefined ? "promoted" : stored.cancelledAt ? "cancelled" : "claimed",
+      }),
+    )
+  yield* events.publish(SessionEvent.PromptCancelled, { sessionID, messageID, timestamp: yield* DateTime.now })
+  return true
+})
+
+export const projectReplaced = Effect.fn("SessionInput.projectReplaced")(function* (
+  db: DatabaseService,
+  input: { readonly sessionID: SessionSchema.ID; readonly messageID: SessionMessage.ID; readonly prompt: Prompt; readonly timestamp: DateTime.Utc },
+) {
+  const updated = yield* db
+    .update(SessionInputTable)
+    .set({ prompt: encodePrompt(input.prompt), time_updated: DateTime.toEpochMillis(input.timestamp) })
+    .where(and(eq(SessionInputTable.id, input.messageID), eq(SessionInputTable.session_id, input.sessionID), isNull(SessionInputTable.promoted_seq), isNull(SessionInputTable.cancelled_at), isNull(SessionInputTable.claimed_attempt_id)))
+    .returning({ id: SessionInputTable.id })
+    .get()
+    .pipe(Effect.orDie)
+  if (!updated) return yield* lifecycleConflict(db, input.messageID)
+})
+
+export const projectCancelled = Effect.fn("SessionInput.projectCancelled")(function* (
+  db: DatabaseService,
+  input: { readonly sessionID: SessionSchema.ID; readonly messageID: SessionMessage.ID; readonly timestamp: DateTime.Utc },
+) {
+  const updated = yield* db
+    .update(SessionInputTable)
+    .set({ cancelled_at: DateTime.toEpochMillis(input.timestamp), time_updated: DateTime.toEpochMillis(input.timestamp) })
+    .where(and(eq(SessionInputTable.id, input.messageID), eq(SessionInputTable.session_id, input.sessionID), isNull(SessionInputTable.promoted_seq), isNull(SessionInputTable.cancelled_at), isNull(SessionInputTable.claimed_attempt_id)))
+    .returning({ id: SessionInputTable.id })
+    .get()
+    .pipe(Effect.orDie)
+  if (!updated) return yield* lifecycleConflict(db, input.messageID)
+})
+
+export const projectClaimed = Effect.fn("SessionInput.projectClaimed")(function* (
+  db: DatabaseService,
+  input: { readonly sessionID: SessionSchema.ID; readonly messageID: SessionMessage.ID; readonly attemptID: SessionExecutionAttempt.ID; readonly timestamp: DateTime.Utc },
+) {
+  const updated = yield* db
+    .update(SessionInputTable)
+    .set({ claimed_attempt_id: input.attemptID, time_updated: DateTime.toEpochMillis(input.timestamp) })
+    .where(and(eq(SessionInputTable.id, input.messageID), eq(SessionInputTable.session_id, input.sessionID), isNull(SessionInputTable.promoted_seq), isNull(SessionInputTable.cancelled_at), isNull(SessionInputTable.claimed_attempt_id)))
+    .returning({ id: SessionInputTable.id })
+    .get()
+    .pipe(Effect.orDie)
+  if (!updated) return yield* lifecycleConflict(db, input.messageID)
+})
+
 export class LifecycleConflict extends Schema.TaggedErrorClass<LifecycleConflict>()("SessionInput.LifecycleConflict", {
   id: SessionMessage.ID,
+  state: Schema.Literals(["promoted", "cancelled", "claimed"]),
 }) {}
+
+const lifecycleConflict = Effect.fn("SessionInput.lifecycleConflict")(function* (
+  db: DatabaseService,
+  id: SessionMessage.ID,
+) {
+  const stored = yield* find(db, id)
+  return yield* Effect.die(
+    new LifecycleConflict({
+      id,
+      state: stored?.promotedSeq !== undefined ? "promoted" : stored?.cancelledAt ? "cancelled" : "claimed",
+    }),
+  )
+})
+
+export class PendingConflict extends Schema.TaggedErrorClass<PendingConflict>()("SessionInput.PendingConflict", {
+  expectedMessageID: SessionMessage.ID,
+  pendingMessageIDs: Schema.Array(SessionMessage.ID),
+}) {}
+
+export const validateOnlyPending = Effect.fn("SessionInput.validateOnlyPending")(function* (
+  db: DatabaseService,
+  sessionID: SessionSchema.ID,
+  expectedMessageID: SessionMessage.ID,
+) {
+  const rows = yield* pending(db, sessionID)
+  if (rows.length !== 1 || rows[0]?.id !== expectedMessageID)
+    return yield* Effect.die(
+      new PendingConflict({ expectedMessageID, pendingMessageIDs: rows.map((row) => row.id) }),
+    )
+})
 
 export const admit = Effect.fn("SessionInput.admit")(function* (
   db: DatabaseService,
@@ -97,7 +247,7 @@ export const projectAdmitted = Effect.fn("SessionInput.projectAdmitted")(functio
     .where(eq(SessionMessageTable.id, input.id))
     .get()
     .pipe(Effect.orDie)
-  if (message !== undefined) return yield* Effect.die(new LifecycleConflict({ id: input.id }))
+  if (message !== undefined) return yield* Effect.die(new LifecycleConflict({ id: input.id, state: "promoted" }))
   const stored = yield* db
     .insert(SessionInputTable)
     .values({
@@ -112,7 +262,7 @@ export const projectAdmitted = Effect.fn("SessionInput.projectAdmitted")(functio
     .returning({ id: SessionInputTable.id })
     .get()
     .pipe(Effect.orDie)
-  if (!stored) return yield* Effect.die(new LifecycleConflict({ id: input.id }))
+  if (!stored) return yield* Effect.die(new LifecycleConflict({ id: input.id, state: "claimed" }))
 })
 
 export const projectPrompted = Effect.fn("SessionInput.projectPrompted")(function* (
@@ -134,6 +284,7 @@ export const projectPrompted = Effect.fn("SessionInput.projectPrompted")(functio
         eq(SessionInputTable.id, input.id),
         eq(SessionInputTable.session_id, input.sessionID),
         isNull(SessionInputTable.promoted_seq),
+        isNull(SessionInputTable.cancelled_at),
       ),
     )
     .returning()
@@ -141,14 +292,15 @@ export const projectPrompted = Effect.fn("SessionInput.projectPrompted")(functio
     .pipe(Effect.orDie)
   if (updated) {
     const stored = fromRow(updated)
-    if (!matchesProjection(stored, input)) return yield* Effect.die(new LifecycleConflict({ id: input.id }))
+    if (!matchesProjection(stored, input))
+      return yield* Effect.die(new LifecycleConflict({ id: input.id, state: "promoted" }))
     return
   }
 
   const stored = yield* find(db, input.id)
   if (stored) {
     if (!matchesProjection(stored, input) || stored.promotedSeq !== input.promotedSeq)
-      return yield* Effect.die(new LifecycleConflict({ id: input.id }))
+      return yield* Effect.die(new LifecycleConflict({ id: input.id, state: "promoted" }))
     return
   }
 
@@ -167,6 +319,25 @@ export const projectPrompted = Effect.fn("SessionInput.projectPrompted")(functio
     .pipe(Effect.orDie)
 })
 
+export const promoteClaimed = Effect.fn("SessionInput.promoteClaimed")(function* (
+  db: DatabaseService,
+  events: EventV2.Interface,
+  sessionID: SessionSchema.ID,
+  messageID: SessionMessage.ID,
+) {
+  const row = yield* db
+    .select()
+    .from(SessionInputTable)
+    .where(and(eq(SessionInputTable.id, messageID), eq(SessionInputTable.session_id, sessionID), isNull(SessionInputTable.promoted_seq), isNull(SessionInputTable.cancelled_at)))
+    .get()
+    .pipe(Effect.orDie)
+  if (!row?.claimed_attempt_id) {
+    const promoted = yield* find(db, messageID)
+    return promoted?.sessionID === sessionID && promoted.promotedSeq !== undefined && promoted.claimedAttemptID !== undefined
+  }
+  return yield* publish(db, events, sessionID, [row]).pipe(Effect.as(true))
+})
+
 export const hasPending = Effect.fn("SessionInput.hasPending")(function* (
   db: DatabaseService,
   sessionID: SessionSchema.ID,
@@ -179,6 +350,8 @@ export const hasPending = Effect.fn("SessionInput.hasPending")(function* (
       and(
         eq(SessionInputTable.session_id, sessionID),
         isNull(SessionInputTable.promoted_seq),
+        isNull(SessionInputTable.cancelled_at),
+        isNull(SessionInputTable.claimed_attempt_id),
         eq(SessionInputTable.delivery, delivery),
       ),
     )
@@ -255,6 +428,8 @@ export const promoteSteers = Effect.fn("SessionInput.promoteSteers")(function* (
       and(
         eq(SessionInputTable.session_id, sessionID),
         isNull(SessionInputTable.promoted_seq),
+        isNull(SessionInputTable.cancelled_at),
+        isNull(SessionInputTable.claimed_attempt_id),
         eq(SessionInputTable.delivery, "steer"),
         lte(SessionInputTable.admitted_seq, cutoff),
       ),
@@ -277,6 +452,8 @@ export const promoteNextQueued = Effect.fn("SessionInput.promoteNextQueued")(fun
       and(
         eq(SessionInputTable.session_id, sessionID),
         isNull(SessionInputTable.promoted_seq),
+        isNull(SessionInputTable.cancelled_at),
+        isNull(SessionInputTable.claimed_attempt_id),
         eq(SessionInputTable.delivery, "queue"),
       ),
     )

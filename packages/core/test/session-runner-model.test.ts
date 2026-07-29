@@ -115,6 +115,7 @@ describe("SessionRunnerModel", () => {
         },
       ])
       const session = SessionV2.Info.make({
+        status: "idle",
         id: SessionV2.ID.make("ses_model_variant"),
         projectID: ProjectV2.ID.global,
         title: "test",
@@ -155,6 +156,7 @@ describe("SessionRunnerModel", () => {
         ],
       )
       const session = SessionV2.Info.make({
+        status: "idle",
         id: SessionV2.ID.make("ses_compatible_variant"),
         projectID: ProjectV2.ID.global,
         title: "test",
@@ -179,6 +181,7 @@ describe("SessionRunnerModel", () => {
     Effect.gen(function* () {
       const catalog = model({ type: "aisdk", package: "@ai-sdk/openai", url: "https://openai.example/v1" })
       const session = SessionV2.Info.make({
+        status: "idle",
         id: SessionV2.ID.make("ses_model_variant_unavailable"),
         projectID: ProjectV2.ID.global,
         title: "test",
@@ -215,6 +218,7 @@ describe("SessionRunnerModel", () => {
         },
       ])
       const session = SessionV2.Info.make({
+        status: "idle",
         id: SessionV2.ID.make("ses_anthropic_variant"),
         projectID: ProjectV2.ID.global,
         title: "test",

@@ -165,6 +165,7 @@ describe("LocationServiceMap", () => {
           const failure = yield* SessionRunnerModel.Service.use((models) =>
             models.resolve(
               SessionV2.Info.make({
+                status: "idle",
                 id: SessionV2.ID.make("ses_unavailable_model"),
                 projectID: ProjectV2.ID.global,
                 title: "test",

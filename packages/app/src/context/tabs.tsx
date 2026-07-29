@@ -50,6 +50,10 @@ export type Tab = SessionTab | DraftTab | UtilityTab
 export type TabInfo = {
   title?: string
   directory?: string
+  awaitingRun?: {
+    attemptID?: string
+    confirmation?: { attemptID: string; newAttemptID: string }
+  }
 }
 
 type RecentTab = {
@@ -93,7 +97,7 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
       createStore<Tab[]>([]),
     )
     const [recent, setRecent, , recentReady] = persisted(Persist.window("tabs.recent"), createStore<RecentTab>({}))
-    const [info, setInfo] = persisted(Persist.window("tabs.info"), createStore<Record<string, TabInfo>>({}))
+    const [info, setInfo, , infoReady] = persisted(Persist.window("tabs.info"), createStore<Record<string, TabInfo>>({}))
     const [closed, setClosed, , closedReady] = persisted(Persist.window("tabs.closed"), createStore<ClosedTab[]>([]))
 
     const params = useParams()
@@ -408,7 +412,7 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
       },
       rememberSessionInfo(tab: SessionTab, session: Session) {
         const key = tabKey(tab)
-        const next = { title: session.title, directory: session.directory }
+        const next = { ...info[key], title: session.title, directory: session.directory }
         const current = info[key]
         if (current?.title === next.title && current.directory === next.directory) return
         setInfo(key, next)
@@ -416,8 +420,13 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
       rememberInfo(tab: Tab, next: TabInfo) {
         const key = tabKey(tab)
         const current = info[key]
-        if (current?.title === next.title && current.directory === next.directory) return
-        setInfo(key, next)
+        if (current?.title === next.title && current.directory === next.directory && current.awaitingRun === next.awaitingRun)
+          return
+        setInfo(key, { ...current, ...next })
+      },
+      rememberAwaitingRun(tab: SessionTab, awaitingRun: TabInfo["awaitingRun"]) {
+        const key = tabKey(tab)
+        setInfo(key, { ...info[key], awaitingRun })
       },
       select: navigateTab,
       remember(tab: Tab) {
@@ -445,6 +454,6 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
       },
     }
 
-    return { ...actions, store, info, ready, recentReady }
+    return { ...actions, store, info, ready, recentReady, infoReady }
   },
 })

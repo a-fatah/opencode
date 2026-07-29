@@ -170,6 +170,97 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         }),
       )
       .handle(
+        "session.input.pending",
+        Effect.fn(function* (ctx) {
+          return yield* session.pendingInputs(ctx.params.sessionID).pipe(
+            Effect.catchTag(
+              "Session.NotFoundError",
+              (error) =>
+                new SessionNotFoundError({
+                  sessionID: error.sessionID,
+                  message: `Session not found: ${error.sessionID}`,
+                }),
+            ),
+          )
+        }),
+      )
+      .handle(
+        "session.input.replace",
+        Effect.fn(function* (ctx) {
+          return yield* session.replaceInput({ ...ctx.params, prompt: ctx.payload.prompt }).pipe(
+            Effect.catchTag(
+              "Session.NotFoundError",
+              (error) =>
+                new SessionNotFoundError({
+                  sessionID: error.sessionID,
+                  message: `Session not found: ${error.sessionID}`,
+                }),
+            ),
+          )
+        }),
+      )
+      .handle(
+        "session.input.cancel",
+        Effect.fn(function* (ctx) {
+          yield* session.cancelInput(ctx.params).pipe(
+            Effect.catchTag(
+              "Session.NotFoundError",
+              (error) =>
+                new SessionNotFoundError({
+                  sessionID: error.sessionID,
+                  message: `Session not found: ${error.sessionID}`,
+                }),
+            ),
+          )
+          return HttpApiSchema.NoContent.make()
+        }),
+      )
+      .handle(
+        "session.resume.confirm",
+        Effect.fn(function* (ctx) {
+          return yield* session.confirmHandoff({ ...ctx.params, ...ctx.payload }).pipe(
+            Effect.catchTag(
+              "Session.NotFoundError",
+              (error) =>
+                new SessionNotFoundError({
+                  sessionID: error.sessionID,
+                  message: `Session not found: ${error.sessionID}`,
+                }),
+            ),
+          )
+        }),
+      )
+      .handle(
+        "session.resume",
+        Effect.fn(function* (ctx) {
+          const result = yield* session.resume({ ...ctx.params, ...ctx.payload }).pipe(
+            Effect.catchTag(
+              "Session.NotFoundError",
+              (error) =>
+                new SessionNotFoundError({
+                  sessionID: error.sessionID,
+                  message: `Session not found: ${error.sessionID}`,
+                }),
+            ),
+            Effect.catchTags({
+              "LLM.Error": resumeError,
+              "SessionRunnerModel.ModelNotSelectedError": resumeError,
+              "SessionRunnerModel.ModelUnavailableError": resumeError,
+              "SessionRunnerModel.VariantUnavailableError": resumeError,
+              "SessionRunnerModel.UnsupportedApiError": resumeError,
+              "Integration.Authorization": resumeError,
+              "Session.MessageDecodeError": resumeError,
+              "Session.ContextSnapshotDecodeError": resumeError,
+              "SessionRunner.ProviderDeclaredFailure": resumeError,
+              "SystemContext.InitializationBlocked": resumeError,
+              "ToolOutputStore.StorageError": resumeError,
+            }),
+          )
+          if (result) return result
+          return yield* Effect.die("Session resume did not return an execution attempt")
+        }),
+      )
+      .handle(
         "session.compact",
         Effect.fn(function* (ctx) {
           yield* session.compact({ sessionID: ctx.params.sessionID }).pipe(
@@ -383,3 +474,8 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
       )
   }),
 )
+
+const resumeError = () =>
+  new UnknownError({
+    message: "Session execution could not be scheduled. Check server logs for details.",
+  })

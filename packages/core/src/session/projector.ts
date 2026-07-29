@@ -15,6 +15,7 @@ import { WorkspaceV2 } from "../workspace"
 import { SessionContextEpoch } from "./context-epoch"
 import { MessageTable, PartTable, SessionInputTable, SessionMessageTable, SessionTable } from "./sql"
 import type { DeepMutable } from "../schema"
+import { SessionExecutionAttempt } from "./execution-attempt"
 
 type DatabaseService = Database.Interface["db"]
 
@@ -256,7 +257,7 @@ const layer = Layer.effectDiscard(
         yield* SessionContextEpoch.reset(db, event.data.sessionID)
       }),
     )
-    yield* events.project(SessionV1.Event.Deleted, (event) =>
+    yield* events.project(SessionEvent.Deleted, (event) =>
       db.delete(SessionTable).where(eq(SessionTable.id, event.data.sessionID)).run().pipe(Effect.orDie),
     )
     yield* events.project(SessionV1.Event.MessageUpdated, (event) =>
@@ -344,7 +345,7 @@ const layer = Layer.effectDiscard(
           .where(eq(SessionTable.id, event.data.sessionID))
           .run()
           .pipe(Effect.orDie)
-        yield* run(db, event)
+        yield* run(db, event).pipe(Effect.orDie)
       }),
     )
     yield* events.project(SessionEvent.Prompted, (event) =>
@@ -358,7 +359,7 @@ const layer = Layer.effectDiscard(
           timeCreated: event.data.timestamp,
           promotedSeq: event.durable.seq,
         })
-        yield* run(db, event)
+        yield* run(db, event).pipe(Effect.orDie)
       }),
     )
     yield* events.project(SessionEvent.PromptAdmitted, (event) =>
@@ -373,6 +374,47 @@ const layer = Layer.effectDiscard(
           timeCreated: event.data.timestamp,
         })
       }),
+    )
+    yield* events.project(SessionEvent.PromptReplaced, (event) =>
+      SessionInput.projectReplaced(db, {
+        sessionID: event.data.sessionID,
+        messageID: event.data.messageID,
+        prompt: event.data.prompt,
+        timestamp: event.data.timestamp,
+      }).pipe(Effect.orDie),
+    )
+    yield* events.project(SessionEvent.PromptCancelled, (event) =>
+      SessionInput.projectCancelled(db, {
+        sessionID: event.data.sessionID,
+        messageID: event.data.messageID,
+        timestamp: event.data.timestamp,
+      }).pipe(Effect.orDie),
+    )
+    yield* events.project(SessionEvent.PromptClaimed, (event) =>
+      SessionInput.projectClaimed(db, {
+        sessionID: event.data.sessionID,
+        messageID: event.data.messageID,
+        attemptID: event.data.attemptID,
+        timestamp: event.data.timestamp,
+      }).pipe(Effect.orDie),
+    )
+    yield* events.project(SessionEvent.Execution.Scheduled, (event) =>
+      SessionExecutionAttempt.projectScheduled(db, event.data).pipe(Effect.orDie),
+    )
+    yield* events.project(SessionEvent.Execution.Started, (event) =>
+      SessionExecutionAttempt.projectLifecycle(db, event).pipe(Effect.orDie),
+    )
+    yield* events.project(SessionEvent.Execution.Completed, (event) =>
+      SessionExecutionAttempt.projectLifecycle(db, event).pipe(Effect.orDie),
+    )
+    yield* events.project(SessionEvent.Execution.Failed, (event) =>
+      SessionExecutionAttempt.projectLifecycle(db, event).pipe(Effect.orDie),
+    )
+    yield* events.project(SessionEvent.Execution.Interrupted, (event) =>
+      SessionExecutionAttempt.projectLifecycle(db, event).pipe(Effect.orDie),
+    )
+    yield* events.project(SessionEvent.Execution.Superseded, (event) =>
+      SessionExecutionAttempt.projectLifecycle(db, event).pipe(Effect.orDie),
     )
     yield* events.project(SessionEvent.ContextUpdated, (event) => run(db, event))
     yield* events.project(SessionEvent.Synthetic, (event) => run(db, event))

@@ -10,6 +10,7 @@ import { Issue } from "./issue"
 import { Project } from "./project"
 import { DateTimeUtcFromMillis, NonNegativeInt, optional, statics } from "./schema"
 import { SessionID } from "./session-id"
+import { WorkspaceProvisioner } from "./workspace-provisioner"
 
 export const ID = Schema.String.check(Schema.isStartsWith("iwt_")).pipe(
   Schema.brand("IssueWatcher.ID"),
@@ -60,13 +61,7 @@ export const Mapping = Schema.Struct({
   projectID: Project.ID,
 }).annotate({ identifier: "IssueWatcher.Mapping" })
 
-export const Workspace = Schema.Union([
-  Schema.Struct({ type: Schema.Literal("branch"), pattern: Schema.String }),
-  Schema.Struct({ type: Schema.Literal("current") }),
-  Schema.Struct({ type: Schema.Literal("worktree") }),
-])
-  .pipe(Schema.toTaggedUnion("type"))
-  .annotate({ identifier: "IssueWatcher.Workspace" })
+export const Workspace = WorkspaceProvisioner.Strategy
 export type Workspace = typeof Workspace.Type
 
 export interface Routing extends Schema.Schema.Type<typeof Routing> {}

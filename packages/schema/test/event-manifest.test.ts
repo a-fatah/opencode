@@ -9,8 +9,8 @@ import { WorkspaceEvent } from "../src/workspace-event"
 
 describe("public event manifest", () => {
   test("owns the complete public event surface", () => {
-    expect(EventManifest.ServerDefinitions.length).toBe(64)
-    expect(EventManifest.Definitions.length).toBe(94)
+    expect(EventManifest.ServerDefinitions.length).toBe(73)
+    expect(EventManifest.Definitions.length).toBe(103)
     expect(SessionV1.Event.Definitions).toEqual([
       SessionV1.Event.Created,
       SessionV1.Event.Updated,
@@ -23,13 +23,15 @@ describe("public event manifest", () => {
       SessionV1.Event.Diff,
       SessionV1.Event.Error,
     ])
-    expect(EventManifest.Latest.size).toBe(94)
-    expect(EventManifest.Durable.size).toBe(36)
+    expect(EventManifest.Latest.size).toBe(103)
+    expect(EventManifest.Durable.size).toBe(45)
   })
 
   test("uses canonical definitions for current public events", () => {
     expect(Session.Event).toBe(SessionEvent)
     expect(Session.Event.Definitions).toBe(SessionEvent.Definitions)
+    expect(Session.Event.Definitions[0]).toBe(SessionV1.Event.Deleted)
+    expect(SessionEvent.DurableDefinitions[0]).toBe(SessionV1.Event.Deleted)
     expect(Workspace.Event).toBe(WorkspaceEvent)
     expect(Workspace.Event.Definitions).toBe(WorkspaceEvent.Definitions)
     expect(EventManifest.Latest.get("session.next.step.ended")).toBe(SessionEvent.Step.Ended)
@@ -42,13 +44,18 @@ describe("public event manifest", () => {
     expect(Reference.Event.Definitions).toEqual([Reference.Event.Updated])
     expect(EventManifest.Latest.has("ide.installed")).toBe(false)
     expect(IdeEvent.Definitions).toEqual([IdeEvent.Installed])
-    expect(EventManifest.Definitions.slice(43, 46)).toEqual([
+    expect(EventManifest.Definitions.slice(52, 55)).toEqual([
       SessionV1.Event.PartDelta,
       SessionV1.Event.Diff,
       SessionV1.Event.Error,
     ])
     expect(EventManifest.Durable.has("session.next.step.ended.1")).toBe(false)
     expect(EventManifest.Durable.get("session.next.step.ended.2")).toBe(SessionEvent.Step.Ended)
+    expect(EventManifest.Latest.get("session.execution.scheduled")).toBe(SessionEvent.Execution.Scheduled)
+    expect(EventManifest.Durable.get("session.execution.superseded.1")).toBe(SessionEvent.Execution.Superseded)
+    expect(EventManifest.Definitions.filter((definition) => definition.type === "session.deleted")).toEqual([
+      SessionV1.Event.Deleted,
+    ])
     expect(EventManifest.Latest.get("issue_watcher.session.materialized")).toBe(
       IssueWatcher.Event.SessionMaterialized,
     )

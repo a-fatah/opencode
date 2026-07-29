@@ -170,6 +170,62 @@ describe("SessionRunCoordinator", () => {
     ),
   )
 
+  it.effect("drains every distinct scheduled value in order", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const firstStarted = yield* Deferred.make<void>()
+        const firstGate = yield* Deferred.make<void>()
+        const completed = yield* Deferred.make<void>()
+        const values: string[] = []
+        const coordinator = yield* SessionRunCoordinator.make<string, never, string>({
+          drain: (_key, _force, value) =>
+            Effect.sync(() => value && values.push(value)).pipe(
+              Effect.andThen(value === "first" ? Deferred.succeed(firstStarted, undefined) : Effect.void),
+              Effect.andThen(value === "first" ? Deferred.await(firstGate) : Effect.void),
+              Effect.tap(() => (value === "third" ? Deferred.succeed(completed, undefined) : Effect.void)),
+            ),
+        })
+
+        yield* coordinator.schedule("session", "first")
+        yield* Deferred.await(firstStarted)
+        yield* coordinator.schedule("session", "second")
+        yield* coordinator.schedule("session", "third")
+        yield* coordinator.schedule("session", "second")
+        yield* Deferred.succeed(firstGate, undefined)
+        yield* Deferred.await(completed)
+
+        expect(values).toEqual(["first", "second", "third"])
+      }),
+    ),
+  )
+
+  it.effect("drains ordinary work after a wake during an explicit value", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const attemptStarted = yield* Deferred.make<void>()
+        const attemptGate = yield* Deferred.make<void>()
+        const ordinaryDrained = yield* Deferred.make<void>()
+        const values: Array<string | undefined> = []
+        const coordinator = yield* SessionRunCoordinator.make<string, never, string>({
+          drain: (_key, _force, value) => {
+            values.push(value)
+            return value
+              ? Deferred.succeed(attemptStarted, undefined).pipe(Effect.andThen(Deferred.await(attemptGate)))
+              : Deferred.succeed(ordinaryDrained, undefined)
+          },
+        })
+
+        yield* coordinator.schedule("session", "attempt")
+        yield* Deferred.await(attemptStarted)
+        yield* coordinator.wake("session")
+        yield* Deferred.succeed(attemptGate, undefined)
+        yield* Deferred.await(ordinaryDrained)
+
+        expect(values).toEqual(["attempt", undefined])
+      }),
+    ),
+  )
+
   it.effect("runs again when woken during the follow-up", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -240,6 +296,32 @@ describe("SessionRunCoordinator", () => {
         expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBeTrue()
         expect(Array.from(yield* coordinator.active)).toEqual([])
         expect(runs).toBe(1)
+      }),
+    ),
+  )
+
+  it.effect("preserves scheduled values when the active execution is interrupted", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const firstStarted = yield* Deferred.make<void>()
+        const secondStarted = yield* Deferred.make<void>()
+        const values: string[] = []
+        const coordinator = yield* SessionRunCoordinator.make<string, never, string>({
+          drain: (_key, _force, value) => {
+            if (value) values.push(value)
+            return value === "first"
+              ? Deferred.succeed(firstStarted, undefined).pipe(Effect.andThen(Effect.never))
+              : Deferred.succeed(secondStarted, undefined)
+          },
+        })
+
+        yield* coordinator.schedule("session", "first")
+        yield* Deferred.await(firstStarted)
+        yield* coordinator.schedule("session", "second")
+        yield* coordinator.interrupt("session")
+        yield* Deferred.await(secondStarted)
+
+        expect(values).toEqual(["first", "second"])
       }),
     ),
   )

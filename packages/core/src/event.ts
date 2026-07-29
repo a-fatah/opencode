@@ -121,6 +121,18 @@ export interface PublishOptions {
   readonly location?: Location.Ref
   /** Local operational projection committed atomically with a new durable event. Not replayed or serialized. */
   readonly commit?: (seq: number) => Effect.Effect<void>
+  /** Transactional precondition evaluated before publication is projected. */
+  readonly validate?: Effect.Effect<void>
+}
+
+export interface PublishInput<D extends Definition = Definition> {
+  readonly definition: D
+  readonly data: Data<D>
+  readonly options?: PublishOptions
+}
+
+export type Published<Definitions extends ReadonlyArray<Definition>> = {
+  readonly [Index in keyof Definitions]: Payload<Definitions[Index]>
 }
 
 export interface Interface {
@@ -129,6 +141,9 @@ export interface Interface {
     data: Data<D>,
     options?: PublishOptions,
   ) => Effect.Effect<Payload<D>>
+  readonly publishBatch: <const Definitions extends readonly [Definition, ...Definition[]]>(
+    input: { readonly [Index in keyof Definitions]: PublishInput<Definitions[Index]> },
+  ) => Effect.Effect<Published<Definitions>>
   readonly subscribe: <D extends Definition>(definition: D) => Stream.Stream<Payload<D>>
   readonly all: () => Stream.Stream<Payload>
   readonly durable: (input: { readonly aggregateID: string; readonly after?: number }) => Stream.Stream<Payload>
@@ -395,6 +410,117 @@ export const layerWith = (options?: LayerOptions) =>
         })
       }
 
+      function commitDurableBatch(events: ReadonlyArray<{
+        definition: Definition
+        event: Payload
+        commit?: PublishOptions["commit"]
+        validate?: PublishOptions["validate"]
+      }>) {
+        return Effect.gen(function* () {
+          const aggregateIDs = events.map(({ definition, event }) => {
+            if (!definition.durable) {
+              throw new InvalidDurableEventError({
+                type: event.type,
+                message: "Batch publication requires durable events",
+              })
+            }
+            const aggregateID = (event.data as Record<string, unknown>)[definition.durable.aggregate]
+            if (typeof aggregateID !== "string") {
+              throw new InvalidDurableEventError({
+                type: event.type,
+                message: `Expected string aggregate field ${definition.durable.aggregate}`,
+              })
+            }
+            return aggregateID
+          })
+          const aggregateID = aggregateIDs[0]
+          if (!aggregateID || aggregateIDs.some((current) => current !== aggregateID)) {
+            return yield* Effect.die(
+              new InvalidDurableEventError({
+                type: events[0]?.event.type ?? "unknown",
+                message: "Batch events must belong to the same aggregate",
+              }),
+            )
+          }
+
+          const committed = yield* Effect.uninterruptible(
+            db
+              .transaction(
+                () =>
+                  Effect.gen(function* () {
+                    const row = yield* db
+                      .select({ seq: EventSequenceTable.seq })
+                      .from(EventSequenceTable)
+                      .where(eq(EventSequenceTable.aggregate_id, aggregateID))
+                      .get()
+                      .pipe(Effect.orDie)
+                    const start = (row?.seq ?? -1) + 1
+                    const payloads = new Array<Payload>()
+
+                    yield* Effect.forEach(events, (item) => item.validate ?? Effect.void, { discard: true })
+
+                    for (const [index, item] of events.entries()) {
+                      const durable = item.definition.durable
+                      if (!durable) continue
+                      const seq = start + index
+                      const stored = yield* db
+                        .select({ aggregateID: EventTable.aggregate_id, seq: EventTable.seq })
+                        .from(EventTable)
+                        .where(eq(EventTable.id, item.event.id))
+                        .get()
+                        .pipe(Effect.orDie)
+                      if (stored) {
+                        yield* Effect.die(
+                          new InvalidDurableEventError({
+                            type: item.event.type,
+                            message: `Event ${item.event.id} already exists at aggregate ${stored.aggregateID} sequence ${stored.seq}`,
+                          }),
+                        )
+                      }
+                      const payload = {
+                        ...item.event,
+                        durable: { aggregateID, seq, version: durable.version },
+                      } as Payload
+                      for (const projector of projectors.get(item.event.type) ?? []) {
+                        yield* projector(payload)
+                      }
+                      if (item.commit) yield* item.commit(seq)
+                      yield* db
+                        .insert(EventSequenceTable)
+                        .values([{ aggregate_id: aggregateID, seq }])
+                        .onConflictDoUpdate({ target: EventSequenceTable.aggregate_id, set: { seq } })
+                        .run()
+                        .pipe(Effect.orDie)
+                      yield* db
+                        .insert(EventTable)
+                        .values([
+                          {
+                            id: item.event.id,
+                            aggregate_id: aggregateID,
+                            seq,
+                            type: versionedType(item.definition.type, durable.version),
+                            data: Schema.encodeUnknownSync(item.definition.data)(item.event.data) as Record<string, unknown>,
+                          },
+                        ])
+                        .run()
+                        .pipe(Effect.orDie)
+                      payloads.push(payload)
+                    }
+                    return payloads
+                  }),
+                { behavior: "immediate" },
+              )
+              .pipe(Effect.orDie),
+          )
+          yield* Effect.forEach(
+            pubsub.durable.get(aggregateID) ?? [],
+            (wake) => PubSub.publish(wake, undefined),
+            { discard: true },
+          )
+          return committed
+        })
+      }
+
       const observe = (event: Payload, observer: (event: Payload) => Effect.Effect<void>) =>
         Effect.suspend(() => observer(event)).pipe(
           Effect.catchCauseIf(
@@ -435,6 +561,37 @@ export const layerWith = (options?: LayerOptions) =>
             } as Payload<D>,
             options?.commit,
           )
+        })
+      }
+
+      function publishBatch<const Definitions extends readonly [Definition, ...Definition[]]>(
+        input: { readonly [Index in keyof Definitions]: PublishInput<Definitions[Index]> },
+      ) {
+        return Effect.gen(function* () {
+          const serviceLocation = Option.getOrUndefined(yield* Effect.serviceOption(Location.Service))
+          const committed = yield* commitDurableBatch(
+            input.map((item) => {
+              const location =
+                item.options?.location ??
+                (serviceLocation
+                  ? { directory: serviceLocation.directory, workspaceID: serviceLocation.workspaceID }
+                  : undefined)
+              return {
+                definition: item.definition,
+                event: {
+                  id: item.options?.id ?? ID.create(),
+                  ...(item.options?.metadata ? { metadata: item.options.metadata } : {}),
+                  type: item.definition.type,
+                  ...(location ? { location } : {}),
+                  data: item.data,
+                } as Payload,
+                commit: item.options?.commit,
+                validate: item.options?.validate,
+              }
+            }),
+          )
+          yield* Effect.forEach(committed, (event) => notify(event, true), { discard: true })
+          return committed as Published<Definitions>
         })
       }
 
@@ -621,6 +778,7 @@ export const layerWith = (options?: LayerOptions) =>
 
       return Service.of({
         publish,
+        publishBatch,
         subscribe,
         all: streamAll,
         durable,

@@ -16,7 +16,13 @@ import { SessionMessage } from "@opencode-ai/core/session/message"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionInput } from "@opencode-ai/core/session/input"
-import { SessionInputTable, SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
+import {
+  SessionExecutionAttemptTable,
+  SessionInputTable,
+  SessionMessageTable,
+  SessionTable,
+} from "@opencode-ai/core/session/sql"
+import { SessionExecutionAttempt } from "@opencode-ai/core/session/execution-attempt"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { testEffect } from "./lib/effect"
 
@@ -24,10 +30,12 @@ const executionCalls: SessionV2.ID[] = []
 const interruptCalls: SessionV2.ID[] = []
 const wakeCalls: SessionV2.ID[] = []
 const activeSessions = new Set<SessionV2.ID>()
+const scheduledAttempts: SessionExecutionAttempt.Info[] = []
 const execution = Layer.succeed(
   SessionExecution.Service,
   SessionExecution.Service.of({
     active: Effect.sync(() => new Set(activeSessions)),
+    ownerEpoch: "test",
     resume: (sessionID) =>
       Effect.sync(() => {
         executionCalls.push(sessionID)
@@ -40,6 +48,7 @@ const execution = Layer.succeed(
       Effect.sync(() => {
         wakeCalls.push(sessionID)
       }),
+    schedule: (attempt) => Effect.sync(() => scheduledAttempts.push(attempt)),
   }),
 )
 const it = testEffect(
@@ -579,6 +588,286 @@ describe("SessionV2.prompt", () => {
 
       expect(executionCalls).toEqual([])
       expect(wakeCalls).toEqual([])
+    }),
+  )
+
+  it.effect("lists, replaces, and tombstones pending input durably", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const admitted = yield* session.prompt({
+        id: messageID,
+        sessionID,
+        prompt: Prompt.make({ text: "Original" }),
+        resume: false,
+      })
+
+      expect(yield* session.pendingInputs(sessionID)).toMatchObject([{ id: admitted.id, prompt: { text: "Original" } }])
+      const replaced = yield* session.replaceInput({
+        sessionID,
+        messageID: admitted.id,
+        prompt: Prompt.make({ text: "Edited" }),
+      })
+      expect(replaced.prompt.text).toBe("Edited")
+      expect(replaced).toMatchObject({ admittedSeq: admitted.admittedSeq, id: admitted.id, timeUpdated: expect.anything() })
+      expect((yield* session.pendingInputs(sessionID))[0]?.prompt.text).toBe("Edited")
+
+      yield* session.cancelInput({ sessionID, messageID: admitted.id })
+      expect(yield* session.pendingInputs(sessionID)).toEqual([])
+      expect(yield* SessionInput.find((yield* Database.Service).db, admitted.id)).toMatchObject({
+        id: admitted.id,
+        cancelledAt: expect.anything(),
+      })
+      expect(
+        yield* session
+          .replaceInput({ sessionID, messageID: admitted.id, prompt: Prompt.make({ text: "Revive" }) })
+          .pipe(Effect.flip),
+      ).toMatchObject({ _tag: "SessionInput.LifecycleConflictError", state: "cancelled" })
+    }),
+  )
+
+  it.effect("atomically claims and schedules one explicit attempt idempotently", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const admitted = yield* session.prompt({
+        id: messageID,
+        sessionID,
+        prompt: Prompt.make({ text: "Run once" }),
+        resume: false,
+      })
+      const attemptID = SessionExecutionAttempt.ID.create()
+      scheduledAttempts.length = 0
+
+      expect(yield* session.resume({ sessionID, expectedMessageID: admitted.id, attemptID })).toEqual({ attemptID })
+      expect(yield* session.resume({ sessionID, expectedMessageID: admitted.id, attemptID })).toEqual({ attemptID })
+      expect(yield* session.pendingInputs(sessionID)).toEqual([])
+      expect(yield* SessionInput.find((yield* Database.Service).db, admitted.id)).toMatchObject({
+        claimedAttemptID: attemptID,
+      })
+      expect(yield* SessionExecutionAttempt.find((yield* Database.Service).db, attemptID)).toMatchObject({
+        id: attemptID,
+        status: "scheduled",
+      })
+      expect(yield* eventCount(EventV2.versionedType(SessionEvent.PromptClaimed.type, 1))).toBe(1)
+      expect(yield* eventCount(EventV2.versionedType(SessionEvent.Execution.Scheduled.type, 1))).toBe(1)
+
+      const other = SessionExecutionAttempt.ID.create()
+      expect(
+        yield* session.resume({ sessionID, expectedMessageID: admitted.id, attemptID: other }).pipe(Effect.flip),
+      ).toMatchObject({ _tag: "SessionInput.AttemptConflictError", attemptID })
+    }),
+  )
+
+  it.effect("reconciles concurrent exact claim retries to one attempt", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const admitted = yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Exact race" }), resume: false })
+      const attemptID = SessionExecutionAttempt.ID.create()
+
+      const results = yield* Effect.all(
+        Array.from({ length: 8 }, () => session.resume({ sessionID, expectedMessageID: admitted.id, attemptID })),
+        { concurrency: "unbounded" },
+      )
+
+      expect(results).toEqual(Array.from({ length: 8 }, () => ({ attemptID })))
+      expect(yield* eventCount(EventV2.versionedType(SessionEvent.PromptClaimed.type, 1))).toBe(1)
+      expect(yield* eventCount(EventV2.versionedType(SessionEvent.Execution.Scheduled.type, 1))).toBe(1)
+    }),
+  )
+
+  it.effect("rejects one-shot resume when another live input exists", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const first = yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "First" }), resume: false })
+      const second = yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Second" }), resume: false })
+
+      expect(yield* session.resume({ sessionID, expectedMessageID: first.id }).pipe(Effect.flip)).toMatchObject({
+        _tag: "SessionInput.PendingConflictError",
+        pendingMessageIDs: [first.id, second.id],
+      })
+    }),
+  )
+
+  it.effect("confirms an ambiguous handoff once with a new attempt", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const { db } = yield* Database.Service
+      const session = yield* SessionV2.Service
+      const admitted = yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Confirm" }), resume: false })
+      const attemptID = SessionExecutionAttempt.ID.create()
+      yield* session.resume({ sessionID, expectedMessageID: admitted.id, attemptID })
+      yield* db
+        .update(SessionExecutionAttemptTable)
+        .set({ status: "handoff_unknown" })
+        .where(eq(SessionExecutionAttemptTable.id, attemptID))
+        .run()
+        .pipe(Effect.orDie)
+      const newAttemptID = SessionExecutionAttempt.ID.create()
+
+      expect(yield* session.confirmHandoff({ sessionID, attemptID, newAttemptID })).toEqual({ attemptID: newAttemptID })
+      expect(yield* session.confirmHandoff({ sessionID, attemptID, newAttemptID })).toEqual({ attemptID: newAttemptID })
+      expect(yield* SessionExecutionAttempt.find(db, attemptID)).toMatchObject({ status: "superseded" })
+      expect(yield* SessionExecutionAttempt.find(db, newAttemptID)).toMatchObject({ status: "scheduled" })
+      expect(yield* eventCount(EventV2.versionedType(SessionEvent.Execution.Superseded.type, 1))).toBe(1)
+    }),
+  )
+
+  it.effect("allows only one replacement pair under concurrent handoff confirmation", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const { db } = yield* Database.Service
+      const session = yield* SessionV2.Service
+      const admitted = yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Race" }), resume: false })
+      const attemptID = SessionExecutionAttempt.ID.create()
+      yield* session.resume({ sessionID, expectedMessageID: admitted.id, attemptID })
+      yield* db
+        .update(SessionExecutionAttemptTable)
+        .set({ status: "handoff_unknown" })
+        .where(eq(SessionExecutionAttemptTable.id, attemptID))
+        .run()
+        .pipe(Effect.orDie)
+      const replacements = [SessionExecutionAttempt.ID.create(), SessionExecutionAttempt.ID.create()] as const
+
+      const exits = yield* Effect.all(
+        replacements.map((newAttemptID) =>
+          session.confirmHandoff({ sessionID, attemptID, newAttemptID }).pipe(Effect.exit),
+        ),
+        { concurrency: "unbounded" },
+      )
+      const winner = yield* SessionExecutionAttempt.supersededBy(db, attemptID)
+
+      if (!winner) return yield* Effect.die("Expected a winning replacement attempt")
+      expect(replacements).toContain(winner)
+      expect(exits.filter((exit) => exit._tag === "Success")).toHaveLength(1)
+      expect(yield* eventCount(EventV2.versionedType(SessionEvent.Execution.Superseded.type, 1))).toBe(1)
+      expect(
+        (yield* db.select().from(SessionExecutionAttemptTable).where(eq(SessionExecutionAttemptTable.session_id, sessionID)).all())
+          .filter((attempt) => attempt.id !== attemptID),
+      ).toHaveLength(1)
+    }),
+  )
+
+  it.effect("skips cancelled and claimed queued inputs during promotion", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const { db } = yield* Database.Service
+      const events = yield* EventV2.Service
+      const session = yield* SessionV2.Service
+      const cancelled = yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Cancel" }), delivery: "queue", resume: false })
+      yield* session.cancelInput({ sessionID, messageID: cancelled.id })
+      const claimed = yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Claim" }), delivery: "queue", resume: false })
+      yield* db.update(SessionInputTable).set({ claimed_attempt_id: SessionExecutionAttempt.ID.create() }).where(eq(SessionInputTable.id, claimed.id)).run().pipe(Effect.orDie)
+      const live = yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Live" }), delivery: "queue", resume: false })
+
+      expect(yield* SessionInput.promoteNextQueued(db, events, sessionID)).toBeTrue()
+      expect(yield* SessionInput.find(db, live.id)).toMatchObject({ promotedSeq: expect.any(Number) })
+      expect(yield* SessionInput.find(db, cancelled.id)).not.toHaveProperty("promotedSeq")
+      expect(yield* SessionInput.find(db, claimed.id)).not.toHaveProperty("promotedSeq")
+    }),
+  )
+
+  it.effect("enriches list and get with shared four-state precedence", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const { db } = yield* Database.Service
+      const session = yield* SessionV2.Service
+      expect((yield* session.get(sessionID)).status).toBe("idle")
+      const admitted = yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Await" }), resume: false })
+      expect((yield* session.get(sessionID)).status).toBe("awaiting_run")
+      expect((yield* session.list()).find((item) => item.id === sessionID)?.status).toBe("awaiting_run")
+      const attemptID = SessionExecutionAttempt.ID.create()
+      yield* session.resume({ sessionID, expectedMessageID: admitted.id, attemptID })
+      yield* db
+        .update(SessionExecutionAttemptTable)
+        .set({ status: "handoff_unknown" })
+        .where(eq(SessionExecutionAttemptTable.id, attemptID))
+        .run()
+        .pipe(Effect.orDie)
+      expect((yield* session.get(sessionID)).status).toBe("handoff_unknown")
+      activeSessions.add(sessionID)
+      expect((yield* session.get(sessionID)).status).toBe("running")
+      activeSessions.delete(sessionID)
+    }).pipe(Effect.ensuring(Effect.sync(() => activeSessions.clear()))),
+  )
+
+  it.effect("classifies foreign-owner scheduled and running attempts as handoff unknown", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const { db } = yield* Database.Service
+      const timestamp = Date.now()
+      yield* db.insert(SessionExecutionAttemptTable).values([
+        {
+          id: SessionExecutionAttempt.ID.create(),
+          session_id: sessionID,
+          message_id: SessionMessage.ID.create(),
+          owner_epoch: "old",
+          status: "scheduled",
+          scheduled_at: timestamp,
+        },
+        {
+          id: SessionExecutionAttempt.ID.create(),
+          session_id: sessionID,
+          message_id: SessionMessage.ID.create(),
+          owner_epoch: "old",
+          status: "running",
+          scheduled_at: timestamp,
+          started_at: timestamp,
+        },
+      ]).run().pipe(Effect.orDie)
+
+      yield* SessionExecutionAttempt.classifyOwner(db, "new")
+      const attempts = yield* db.select().from(SessionExecutionAttemptTable).where(eq(SessionExecutionAttemptTable.session_id, sessionID)).all().pipe(Effect.orDie)
+
+      expect(attempts.map((attempt) => attempt.status)).toEqual(["handoff_unknown", "handoff_unknown"])
+    }),
+  )
+
+  it.effect("rejects lifecycle events with mismatched identity or illegal transitions", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const { db } = yield* Database.Service
+      const session = yield* SessionV2.Service
+      const admitted = yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Lifecycle" }), resume: false })
+      const attemptID = SessionExecutionAttempt.ID.create()
+      yield* session.resume({ sessionID, expectedMessageID: admitted.id, attemptID })
+      const timestamp = yield* DateTime.now
+
+      expect(
+        String(
+          yield* SessionExecutionAttempt.projectLifecycle(db, {
+            id: EventV2.ID.create(),
+            type: SessionEvent.Execution.Started.type,
+            data: {
+              sessionID,
+              messageID: admitted.id,
+              attemptID,
+              ownerEpoch: "wrong",
+              timestamp,
+            },
+            durable: { aggregateID: sessionID, seq: 0, version: 1 },
+          }).pipe(Effect.exit),
+        ),
+      ).toContain("identity mismatch")
+      expect(
+        String(
+          yield* SessionExecutionAttempt.projectLifecycle(db, {
+            id: EventV2.ID.create(),
+            type: SessionEvent.Execution.Completed.type,
+            data: {
+              sessionID,
+              messageID: admitted.id,
+              attemptID,
+              ownerEpoch: "test",
+              timestamp,
+            },
+            durable: { aggregateID: sessionID, seq: 1, version: 1 },
+          }).pipe(Effect.exit),
+        ),
+      ).toContain("scheduled -> completed")
+      expect(yield* SessionExecutionAttempt.find(db, attemptID)).toMatchObject({ status: "scheduled" })
     }),
   )
 })

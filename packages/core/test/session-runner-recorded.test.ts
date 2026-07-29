@@ -93,8 +93,10 @@ const execution = Layer.effect(
     })
     return SessionExecution.Service.of({
       active: coordinator.active,
+      ownerEpoch: "test",
       resume: coordinator.run,
       wake: coordinator.wake,
+      schedule: () => Effect.void,
       interrupt: coordinator.interrupt,
     })
   }),

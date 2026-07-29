@@ -17,6 +17,7 @@ const session = (input: {
   parentID?: string
   archived?: number
   updated?: number
+  status?: "running" | "handoff_unknown" | "awaiting_run" | "idle"
 }) => ({
   id: input.id,
   parentID: input.parentID,
@@ -25,6 +26,7 @@ const session = (input: {
   tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
   time: { created: 1, updated: input.updated ?? 1, archived: input.archived },
   title: input.id,
+  status: input.status ?? "idle",
   location: { directory: input.directory ?? "/project" },
 })
 
@@ -78,7 +80,7 @@ describe("Home V2 session index", () => {
       time: { created: 1, updated: 20, archived: null },
     } as unknown as SessionV2Info
     const result = parseHomeSessionIndex([
-      session({ id: "root", updated: 30 }),
+      session({ id: "root", updated: 30, status: "awaiting_run" }),
       activeNull,
       session({ id: "child", parentID: "root", updated: 40 }),
       session({ id: "archived", archived: 50, updated: 50 }),
@@ -92,6 +94,7 @@ describe("Home V2 session index", () => {
         directory: "/project",
         projectID: "project",
         title: "root",
+        status: "awaiting_run",
         time: { created: 1, updated: 30 },
       }),
       expect.objectContaining({
@@ -145,10 +148,12 @@ describe("Home V2 session index", () => {
     expect(homeSessionIndexSessions({ sessions: initial, eventSequence: 1 }, events)[0]?.title).toBe("current")
   })
 
-  test("refetches after reconnect, disposal, and session moves", () => {
+  test("refetches after reconnect, disposal, session moves, and input or execution lifecycle events", () => {
     expect(homeSessionIndexRefresh("server.connected", false)).toEqual({ connected: true, refetch: false })
     expect(homeSessionIndexRefresh("server.connected", true)).toEqual({ connected: true, refetch: true })
     expect(homeSessionIndexRefresh("global.disposed", true).refetch).toBe(true)
     expect(homeSessionIndexRefresh("session.next.moved", true).refetch).toBe(true)
+    expect(homeSessionIndexRefresh("session.next.prompt.admitted", true).refetch).toBe(true)
+    expect(homeSessionIndexRefresh("session.execution.started", true).refetch).toBe(true)
   })
 })

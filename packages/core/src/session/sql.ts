@@ -14,6 +14,7 @@ import { Timestamps } from "../database/schema.sql"
 import type { SystemContext } from "../system-context/index"
 import { AgentV2 } from "../agent"
 import type { Revert } from "@opencode-ai/schema/revert"
+import type { SessionExecutionAttempt } from "@opencode-ai/schema/session-execution-attempt"
 
 type SessionMessageData = Omit<(typeof SessionMessage.Message)["Encoded"], "type" | "id">
 type V1MessageData = Omit<SessionV1.Info, "id" | "sessionID">
@@ -149,6 +150,9 @@ export const SessionInputTable = sqliteTable(
     delivery: text().$type<SessionInput.Delivery>().notNull(),
     admitted_seq: integer().notNull(),
     promoted_seq: integer(),
+    time_updated: integer(),
+    cancelled_at: integer(),
+    claimed_attempt_id: text().$type<SessionExecutionAttempt.ID>(),
     time_created: integer()
       .notNull()
       .$default(() => Date.now()),
@@ -162,6 +166,31 @@ export const SessionInputTable = sqliteTable(
     ),
     uniqueIndex("session_input_session_admitted_seq_idx").on(table.session_id, table.admitted_seq),
     uniqueIndex("session_input_session_promoted_seq_idx").on(table.session_id, table.promoted_seq),
+    uniqueIndex("session_input_claimed_attempt_uidx").on(table.claimed_attempt_id),
+  ],
+)
+
+export const SessionExecutionAttemptTable = sqliteTable(
+  "session_execution_attempt",
+  {
+    id: text().$type<SessionExecutionAttempt.ID>().primaryKey(),
+    session_id: text()
+      .$type<SessionSchema.ID>()
+      .notNull()
+      .references(() => SessionTable.id, { onDelete: "cascade" }),
+    message_id: text().$type<SessionMessage.ID>().notNull(),
+    owner_epoch: text().notNull(),
+    status: text().$type<SessionExecutionAttempt.Status>().notNull(),
+    superseded_by_attempt_id: text().$type<SessionExecutionAttempt.ID>(),
+    failure: text({ mode: "json" }).$type<SessionExecutionAttempt.Failure>(),
+    interruption: text({ mode: "json" }).$type<SessionExecutionAttempt.Interruption>(),
+    scheduled_at: integer().notNull(),
+    started_at: integer(),
+    completed_at: integer(),
+  },
+  (table) => [
+    index("session_execution_attempt_session_status_idx").on(table.session_id, table.status),
+    index("session_execution_attempt_message_idx").on(table.message_id),
   ],
 )
 

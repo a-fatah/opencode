@@ -10,6 +10,8 @@ import { Project } from "./project"
 import { DateTimeUtcFromMillis, NonNegativeInt, optional, statics } from "./schema"
 import { SessionID } from "./session-id"
 import { SessionMessage } from "./session-message"
+import { SessionExecutionAttempt } from "./session-execution-attempt"
+import { WorkspaceProvisioner } from "./workspace-provisioner"
 
 export const ID = Schema.String.check(Schema.isStartsWith("imt_")).pipe(
   Schema.brand("IssueMatch.ID"),
@@ -105,7 +107,7 @@ export const Materialization = Schema.Struct({
   projectID: Project.ID,
   workspace: Schema.suspend(() => IssueWatcher.Workspace),
   resolvedLocation: optional(Location.Ref),
-  workspaceLease: optional(Schema.Json),
+  workspaceLease: optional(WorkspaceProvisioner.Lease),
   baselineObservationID: ObservationID,
   state: Schema.Literals([
     "pending",
@@ -120,7 +122,7 @@ export const Materialization = Schema.Struct({
   ]),
   sessionID: SessionID,
   messageID: SessionMessage.ID,
-  executionAttemptID: optional(Schema.String),
+  executionAttemptID: optional(SessionExecutionAttempt.ID),
   providerStarted: Schema.Boolean,
   attempts: NonNegativeInt,
   error: optional(Schema.String),

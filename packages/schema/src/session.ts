@@ -16,9 +16,15 @@ export type ID = SessionID
 
 export const Event = SessionEvent
 
+export const Status = Schema.Literals(["running", "handoff_unknown", "awaiting_run", "idle"]).annotate({
+  identifier: "Session.Status",
+})
+export type Status = typeof Status.Type
+
 export interface Info extends Schema.Schema.Type<typeof Info> {}
 export const Info = Schema.Struct({
   id: ID,
+  status: Status,
   parentID: ID.pipe(optional),
   projectID: Project.ID,
   agent: Agent.ID.pipe(optional),
@@ -43,7 +49,7 @@ export const Info = Schema.Struct({
   subpath: RelativePath.pipe(optional),
   revert: Revert.State.pipe(optional),
   provenance: SessionProvenance.Ref.pipe(optional),
-}).annotate({ identifier: "SessionV2.Info" })
+}).annotate({ identifier: "Session.Info" })
 
 export const ListAnchor = Schema.Struct({
   id: ID,

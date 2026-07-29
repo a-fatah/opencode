@@ -223,6 +223,101 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
         ),
     )
     .add(
+      HttpApiEndpoint.get("session.input.pending", "/api/session/:sessionID/input/pending", {
+        params: { sessionID: Session.ID },
+        success: Schema.Array(SessionInput.Pending),
+        error: SessionNotFoundError,
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.input.pending",
+            summary: "List pending session inputs",
+            description: "Retrieve the live unpromoted and unclaimed inputs for a session.",
+          }),
+        ),
+    )
+    .add(
+      HttpApiEndpoint.put("session.input.replace", "/api/session/:sessionID/input/:messageID", {
+        params: { sessionID: Session.ID, messageID: SessionMessage.ID },
+        payload: SessionInput.ReplaceInput,
+        success: SessionInput.Admitted,
+        error: [
+          SessionNotFoundError,
+          SessionInput.NotFoundError.pipe(HttpApiSchema.status(404)),
+          SessionInput.LifecycleConflictError.pipe(HttpApiSchema.status(409)),
+        ],
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.input.replace",
+            summary: "Replace pending session input",
+            description: "Replace an input while it remains unpromoted and unclaimed.",
+          }),
+        ),
+    )
+    .add(
+      HttpApiEndpoint.delete("session.input.cancel", "/api/session/:sessionID/input/:messageID", {
+        params: { sessionID: Session.ID, messageID: SessionMessage.ID },
+        success: HttpApiSchema.NoContent,
+        error: [
+          SessionNotFoundError,
+          SessionInput.NotFoundError.pipe(HttpApiSchema.status(404)),
+          SessionInput.LifecycleConflictError.pipe(HttpApiSchema.status(409)),
+        ],
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.input.cancel",
+            summary: "Cancel pending session input",
+            description: "Cancel an input while it remains unpromoted and unclaimed.",
+          }),
+        ),
+    )
+    .add(
+      HttpApiEndpoint.post("session.resume.confirm", "/api/session/:sessionID/resume/confirm", {
+        params: { sessionID: Session.ID },
+        payload: SessionInput.ConfirmHandoffInput,
+        success: SessionInput.ResumeResult.pipe(HttpApiSchema.status(202)),
+        error: [
+          SessionNotFoundError,
+          SessionInput.AttemptConflictError.pipe(HttpApiSchema.status(409)),
+        ],
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.resume.confirm",
+            summary: "Confirm session execution handoff",
+            description: "Explicitly supersede an ambiguous execution attempt and schedule its replacement.",
+          }),
+        ),
+    )
+    .add(
+      HttpApiEndpoint.post("session.resume", "/api/session/:sessionID/resume", {
+        params: { sessionID: Session.ID },
+        payload: SessionInput.ResumeInput,
+        success: SessionInput.ResumeResult.pipe(HttpApiSchema.status(202)),
+        error: [
+          SessionNotFoundError,
+          SessionInput.NotFoundError.pipe(HttpApiSchema.status(404)),
+          SessionInput.PendingConflictError.pipe(HttpApiSchema.status(409)),
+          SessionInput.AttemptConflictError.pipe(HttpApiSchema.status(409)),
+          UnknownError,
+        ],
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.resume",
+            summary: "Resume session execution",
+            description: "Claim the expected pending input, durably schedule execution, and return immediately.",
+          }),
+        ),
+    )
+    .add(
       HttpApiEndpoint.post("session.compact", "/api/session/:sessionID/compact", {
         params: { sessionID: Session.ID },
         success: HttpApiSchema.NoContent,

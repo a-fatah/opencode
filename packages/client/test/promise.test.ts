@@ -46,10 +46,16 @@ test("exposes every standard HTTP API group", () => {
     "getSettings",
     "updateSettings",
     "list",
+    "runAll",
     "create",
     "get",
     "update",
     "archive",
+    "run",
+    "history",
+    "ignores",
+    "inbox",
+    "inboxSummary",
     "enable",
   ])
 })
@@ -68,6 +74,53 @@ test("sessions.get returns the wire projection", async () => {
   const result = await client.sessions.get({ sessionID: "ses_test" })
 
   expect(result.time.created).toBe(1_717_171_717_000)
+})
+
+test("generated Promise session input and resume methods use the current contract", async () => {
+  const requests: Array<{ url: string; init?: RequestInit }> = []
+  const client = OpenCode.make({
+    baseUrl: "http://localhost:3000",
+    fetch: async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+      requests.push({ url, init })
+      if (init?.method === "DELETE") return new Response(null, { status: 204 })
+      if (url.endsWith("/input/pending")) return Response.json([admission.data])
+      if (init?.method === "PUT") return Response.json({ ...admission.data, prompt: { text: "Edited" } })
+      return Response.json({ attemptID: url.endsWith("/resume/confirm") ? "sea_new" : "sea_run" }, { status: 202 })
+    },
+  })
+
+  const pending = await client.sessions.pending({ sessionID: "ses_test" })
+  const replaced = await client.sessions.replace({ sessionID: "ses_test", messageID: "msg_test", prompt: { text: "Edited" } })
+  await client.sessions.cancel({ sessionID: "ses_test", messageID: "msg_test" })
+  const resumed = await client.sessions.resume({
+    sessionID: "ses_test",
+    expectedMessageID: "msg_test",
+    attemptID: "sea_run",
+  })
+  const confirmed = await client.sessions.confirm({
+    sessionID: "ses_test",
+    attemptID: "sea_old",
+    newAttemptID: "sea_new",
+  })
+
+  expect(pending[0]?.id).toBe("msg_test")
+  expect(replaced.prompt.text).toBe("Edited")
+  expect(resumed).toEqual({ attemptID: "sea_run" })
+  expect(confirmed).toEqual({ attemptID: "sea_new" })
+  expect(requests.map((request) => [request.init?.method ?? "GET", request.url])).toEqual([
+    ["GET", "http://localhost:3000/api/session/ses_test/input/pending"],
+    ["PUT", "http://localhost:3000/api/session/ses_test/input/msg_test"],
+    ["DELETE", "http://localhost:3000/api/session/ses_test/input/msg_test"],
+    ["POST", "http://localhost:3000/api/session/ses_test/resume"],
+    ["POST", "http://localhost:3000/api/session/ses_test/resume/confirm"],
+  ])
+  expect(requests.slice(1).map((request) => (typeof request.init?.body === "string" ? JSON.parse(request.init.body) : undefined))).toEqual([
+    { prompt: { text: "Edited" } },
+    undefined,
+    { expectedMessageID: "msg_test", attemptID: "sea_run" },
+    { attemptID: "sea_old", newAttemptID: "sea_new" },
+  ])
 })
 
 test("events.subscribe exposes the Promise event stream wire projection", async () => {
@@ -236,6 +289,7 @@ const session = {
       updated: 1_717_171_717_000,
     },
     title: "Test",
+    status: "awaiting_run",
     location: { directory: "/tmp/project" },
   },
 }

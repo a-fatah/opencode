@@ -24,6 +24,20 @@ export default {
         );
       `)
       yield* tx.run(`
+        CREATE TABLE \`workspace_provisioner_lease\` (
+          \`id\` text PRIMARY KEY,
+          \`owner_id\` text NOT NULL,
+          \`project_id\` text NOT NULL,
+          \`directory\` text NOT NULL,
+          \`branch\` text,
+          \`lease\` text NOT NULL,
+          \`state\` text NOT NULL,
+          \`setup_completed\` text,
+          \`time_created\` integer NOT NULL,
+          \`time_updated\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
         CREATE TABLE \`account_state\` (
           \`id\` integer PRIMARY KEY,
           \`active_account_id\` text,
@@ -324,6 +338,22 @@ export default {
         );
       `)
       yield* tx.run(`
+        CREATE TABLE \`session_execution_attempt\` (
+          \`id\` text PRIMARY KEY,
+          \`session_id\` text NOT NULL,
+          \`message_id\` text NOT NULL,
+          \`owner_epoch\` text NOT NULL,
+          \`status\` text NOT NULL,
+          \`superseded_by_attempt_id\` text,
+          \`failure\` text,
+          \`interruption\` text,
+          \`scheduled_at\` integer NOT NULL,
+          \`started_at\` integer,
+          \`completed_at\` integer,
+          CONSTRAINT \`fk_session_execution_attempt_session_id_session_id_fk\` FOREIGN KEY (\`session_id\`) REFERENCES \`session\`(\`id\`) ON DELETE CASCADE
+        );
+      `)
+      yield* tx.run(`
         CREATE TABLE \`session_input\` (
           \`id\` text PRIMARY KEY,
           \`session_id\` text NOT NULL,
@@ -331,6 +361,9 @@ export default {
           \`delivery\` text NOT NULL,
           \`admitted_seq\` integer NOT NULL,
           \`promoted_seq\` integer,
+          \`time_updated\` integer,
+          \`cancelled_at\` integer,
+          \`claimed_attempt_id\` text,
           \`time_created\` integer NOT NULL,
           CONSTRAINT \`fk_session_input_session_id_session_id_fk\` FOREIGN KEY (\`session_id\`) REFERENCES \`session\`(\`id\`) ON DELETE CASCADE
         );
@@ -405,6 +438,12 @@ export default {
           CONSTRAINT \`fk_session_share_session_id_session_id_fk\` FOREIGN KEY (\`session_id\`) REFERENCES \`session\`(\`id\`) ON DELETE CASCADE
         );
       `)
+      yield* tx.run(
+        `CREATE UNIQUE INDEX \`workspace_provisioner_lease_directory_uidx\` ON \`workspace_provisioner_lease\` (\`directory\`) WHERE "workspace_provisioner_lease"."state" != 'cleaned';`,
+      )
+      yield* tx.run(
+        `CREATE UNIQUE INDEX \`workspace_provisioner_lease_branch_uidx\` ON \`workspace_provisioner_lease\` (\`project_id\`,\`branch\`) WHERE "workspace_provisioner_lease"."state" != 'cleaned';`,
+      )
       yield* tx.run(`CREATE UNIQUE INDEX \`credential_connection_uidx\` ON \`credential\` (\`connection_id\`);`)
       yield* tx.run(`CREATE UNIQUE INDEX \`event_aggregate_seq_idx\` ON \`event\` (\`aggregate_id\`,\`seq\`);`)
       yield* tx.run(`CREATE INDEX \`event_aggregate_type_seq_idx\` ON \`event\` (\`aggregate_id\`,\`type\`,\`seq\`);`)
@@ -454,6 +493,12 @@ export default {
       yield* tx.run(`CREATE INDEX \`part_message_id_id_idx\` ON \`part\` (\`message_id\`,\`id\`);`)
       yield* tx.run(`CREATE INDEX \`part_session_idx\` ON \`part\` (\`session_id\`);`)
       yield* tx.run(
+        `CREATE INDEX \`session_execution_attempt_session_status_idx\` ON \`session_execution_attempt\` (\`session_id\`,\`status\`);`,
+      )
+      yield* tx.run(
+        `CREATE INDEX \`session_execution_attempt_message_idx\` ON \`session_execution_attempt\` (\`message_id\`);`,
+      )
+      yield* tx.run(
         `CREATE INDEX \`session_input_session_pending_delivery_seq_idx\` ON \`session_input\` (\`session_id\`,\`promoted_seq\`,\`delivery\`,\`admitted_seq\`);`,
       )
       yield* tx.run(
@@ -461,6 +506,9 @@ export default {
       )
       yield* tx.run(
         `CREATE UNIQUE INDEX \`session_input_session_promoted_seq_idx\` ON \`session_input\` (\`session_id\`,\`promoted_seq\`);`,
+      )
+      yield* tx.run(
+        `CREATE UNIQUE INDEX \`session_input_claimed_attempt_uidx\` ON \`session_input\` (\`claimed_attempt_id\`);`,
       )
       yield* tx.run(
         `CREATE UNIQUE INDEX \`session_message_session_seq_idx\` ON \`session_message\` (\`session_id\`,\`seq\`);`,

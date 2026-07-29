@@ -32,6 +32,21 @@ const initialMessagePageSize = 20
 const historyMessagePageSize = 200
 const sessionInfoLimit = 2_048
 const emptyIDs: ReadonlySet<string> = new Set()
+const SESSION_INFO_LIFECYCLE_EVENTS = new Set([
+  "session.next.prompt.admitted",
+  "session.next.prompt.replaced",
+  "session.next.prompt.cancelled",
+  "session.next.prompt.claimed",
+  "session.input.admitted",
+  "session.input.promoted",
+  "session.execution.scheduled",
+  "session.execution.started",
+  "session.execution.completed",
+  "session.execution.succeeded",
+  "session.execution.failed",
+  "session.execution.interrupted",
+  "session.execution.superseded",
+])
 
 function needsOlderTurnRoot(source: readonly SessionMessageInfo[]) {
   const boundary = source.find(
@@ -976,6 +991,7 @@ export function createServerSession(
         next: event.data.at,
       })
     if (event.type === "session.forked") void resolve(sessionID, { force: true }).catch(() => {})
+    if (SESSION_INFO_LIFECYCLE_EVENTS.has(event.type)) void resolve(sessionID, { force: true }).catch(() => {})
     if (
       event.type === "session.revert.staged" ||
       event.type === "session.revert.cleared" ||

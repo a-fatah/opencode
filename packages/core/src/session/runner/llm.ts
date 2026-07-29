@@ -29,9 +29,10 @@ import { SessionCompaction } from "../compaction"
 import { SessionEvent } from "../event"
 import { SessionHistory } from "../history"
 import { SessionInput } from "../input"
+import { SessionMessage } from "../message"
 import { SessionSchema } from "../schema"
 import { SessionStore } from "../store"
-import { type RunError, Service } from "./index"
+import { ProviderDeclaredFailure, type RunError, Service } from "./index"
 import { SessionRunnerModel } from "./model"
 import { createLLMEventPublisher } from "./publish-llm-event"
 import { toLLMMessages } from "./to-llm-message"
@@ -340,6 +341,13 @@ const layer = Layer.effect(
           if (stream._tag === "Success" && !publisher.hasProviderError())
             yield* withPublication(publisher.failUnsettledTools("Provider did not return a tool result", true))
           if (stream._tag === "Failure") return yield* Effect.failCause(stream.cause)
+          const providerFailure = publisher.providerFailure()
+          if (providerFailure)
+            return yield* new ProviderDeclaredFailure({
+              message: providerFailure.message,
+              classification: providerFailure.classification,
+              retryable: providerFailure.retryable,
+            })
           if (settled._tag === "Failure" && Cause.hasInterrupts(settled.cause))
             return yield* Effect.failCause(settled.cause)
           return { needsContinuation: !publisher.hasProviderError() && needsContinuation, step: currentStep }
@@ -383,26 +391,37 @@ const layer = Layer.effect(
     const run = Effect.fn("SessionRunner.run")(function* (input: {
       readonly sessionID: SessionSchema.ID
       readonly force: boolean
+      readonly claimedMessageID?: SessionMessage.ID
     }) {
+      if (input.claimedMessageID) {
+        const promoted = yield* SessionInput.promoteClaimed(db, events, input.sessionID, input.claimedMessageID)
+        if (!promoted) return
+      }
       const hasSteer = yield* SessionInput.hasPending(db, input.sessionID, "steer")
       const hasQueue = hasSteer ? false : yield* SessionInput.hasPending(db, input.sessionID, "queue")
       if (!input.force && !hasSteer && !hasQueue) return
       yield* failInterruptedTools(input.sessionID)
-      let promotion: SessionInput.Delivery | undefined = hasSteer ? "steer" : hasQueue ? "queue" : undefined
-      let shouldRun = input.force || hasSteer || hasQueue
-      while (shouldRun) {
-        let needsContinuation = true
-        let step = 1
-        while (needsContinuation) {
-          const result = yield* runTurn(input.sessionID, promotion, step)
-          needsContinuation = result.needsContinuation
-          step = result.step + 1
-          promotion = "steer"
-          if (!needsContinuation) needsContinuation = yield* SessionInput.hasPending(db, input.sessionID, "steer")
-        }
-        shouldRun = yield* SessionInput.hasPending(db, input.sessionID, "queue")
-        promotion = shouldRun ? "queue" : undefined
+      if (input.claimedMessageID) {
+        yield* runTurn(input.sessionID, undefined, 1)
+        return
       }
+      yield* Effect.gen(function* () {
+        let promotion: SessionInput.Delivery | undefined = hasSteer ? "steer" : hasQueue ? "queue" : undefined
+        let shouldRun = input.force || hasSteer || hasQueue
+        while (shouldRun) {
+          let needsContinuation = true
+          let step = 1
+          while (needsContinuation) {
+            const result = yield* runTurn(input.sessionID, promotion, step)
+            needsContinuation = result.needsContinuation
+            step = result.step + 1
+            promotion = "steer"
+            if (!needsContinuation) needsContinuation = yield* SessionInput.hasPending(db, input.sessionID, "steer")
+          }
+          shouldRun = yield* SessionInput.hasPending(db, input.sessionID, "queue")
+          promotion = shouldRun ? "queue" : undefined
+        }
+      }).pipe(Effect.catchTag("SessionRunner.ProviderDeclaredFailure", () => Effect.void))
     })
 
     return Service.of({

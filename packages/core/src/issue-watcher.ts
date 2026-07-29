@@ -182,6 +182,11 @@ export interface Interface {
       IssueWatcher.IntegrationSummary,
       SourceNotFoundError | ConnectionNotFoundError | TenantConflictError | IssueProvider.Error
     >
+    readonly metadata: (
+      integrationID: Integration.ID,
+      connectionID: Credential.ConnectionID,
+      input: IssueWatcher.MetadataInput,
+    ) => Effect.Effect<IssueWatcher.Metadata, SourceNotFoundError | ConnectionNotFoundError | IssueProvider.Error>
   }
   readonly summary: () => Effect.Effect<IssueWatcher.InboxSummary>
   readonly run: (id: ID) => Effect.Effect<IssueWatcher.Run, NotFoundError | OwnerConflictError | RunConflictError>
@@ -886,6 +891,10 @@ const layer = Layer.effect(
             .rotateConnection(connectionID, { value: verified.value, label: input.label })
             .pipe(Effect.mapError(() => new ConnectionNotFoundError({ connectionID })))
           return yield* projectSource(adapter)
+        }),
+        metadata: Effect.fn("IssueWatcher.source.metadata")(function* (integrationID, connectionID, input) {
+          const adapter = yield* provider(integrationID)
+          return yield* adapter.metadata(yield* ownedConnection(integrationID, connectionID), input)
         }),
       },
       summary: inboxSummary,

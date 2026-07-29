@@ -244,6 +244,7 @@ describe("IssueWatcher", () => {
         method: { type: "key" },
         tenantIdentity: () => Effect.succeed("github.com"),
         verify: () => Effect.succeed({ ok: true, detail: "connected" }),
+        metadata: () => Effect.succeed({ projects: [], users: [], labels: [], statuses: [], components: [], issueTypes: [], fields: [] }),
         search: ({ page }) => {
           pages.push(page)
           const offset = page ? Number(page) : 0
@@ -296,6 +297,7 @@ describe("IssueWatcher", () => {
         method: { type: "key" },
         tenantIdentity: () => Effect.succeed("github.com"),
         verify: () => Effect.succeed({ ok: true, detail: "connected" }),
+        metadata: () => Effect.succeed({ projects: [], users: [], labels: [], statuses: [], components: [], issueTypes: [], fields: [] }),
         search: ({ cursor, page }) => {
           pages.push({ cursor, page })
           if (!authenticated) return new IssueProvider.AuthenticationError({ detail: "expired" })
@@ -358,6 +360,7 @@ describe("IssueWatcher", () => {
         method: { type: "key" },
         tenantIdentity: () => Effect.succeed("example.com"),
         verify: () => Effect.succeed({ ok: true, detail: "connected" }),
+        metadata: () => Effect.succeed({ projects: [], users: [], labels: [], statuses: [], components: [], issueTypes: [], fields: [] }),
         search: ({ page }) => Effect.succeed(page
           ? { issues: [], cursor: "starting-cursor" }
           : { issues: [issue], cursor: "advanced-cursor", nextPage: "empty" }),
@@ -414,6 +417,7 @@ describe("IssueWatcher", () => {
         method: { type: "key" },
         tenantIdentity: () => Effect.succeed("example.com"),
         verify: () => Effect.succeed({ ok: true, detail: "connected" }),
+        metadata: () => Effect.succeed({ projects: [], users: [], labels: [], statuses: [], components: [], issueTypes: [], fields: [] }),
         search: () => Effect.succeed({
           issues: [
             Issue.Info.make({ ...issue, title: `Ignored ${revision}` }),
@@ -486,6 +490,7 @@ describe("IssueWatcher", () => {
         method: { type: "key" },
         tenantIdentity: () => Effect.succeed("example.com"),
         verify: () => Effect.succeed({ ok: true, detail: "connected" }),
+        metadata: () => Effect.succeed({ projects: [], users: [], labels: [], statuses: [], components: [], issueTypes: [], fields: [] }),
         search: () => {
           searches++
           return Deferred.succeed(started, undefined).pipe(
@@ -540,6 +545,7 @@ describe("IssueWatcher", () => {
         method: { type: "key" },
         tenantIdentity: () => Effect.succeed("example.com"),
         verify: () => Effect.succeed({ ok: true, detail: "connected" }),
+        metadata: () => Effect.succeed({ projects: [], users: [], labels: [], statuses: [], components: [], issueTypes: [], fields: [] }),
         search: () => Deferred.succeed(started, undefined).pipe(
           Effect.andThen(Deferred.await(release)),
           Effect.andThen(new IssueProvider.AuthenticationError({ detail: "expired request" })),

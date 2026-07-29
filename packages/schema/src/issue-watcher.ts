@@ -289,6 +289,37 @@ export const IntegrationSummary = Schema.Struct({
   owner: OwnerStatus,
 }).annotate({ identifier: "IssueWatcher.IntegrationSummary" })
 
+export interface MetadataInput extends Schema.Schema.Type<typeof MetadataInput> {}
+export const MetadataInput = Schema.Struct({
+  issueProjects: Schema.Array(Schema.String),
+}).annotate({ identifier: "IssueWatcher.MetadataInput" })
+
+export interface MetadataProject extends Schema.Schema.Type<typeof MetadataProject> {}
+export const MetadataProject = Schema.Struct({
+  id: Schema.String,
+  key: Schema.String,
+  name: Schema.String,
+  imageUrl: optional(Schema.String),
+}).annotate({ identifier: "IssueWatcher.MetadataProject" })
+
+export interface MetadataOption extends Schema.Schema.Type<typeof MetadataOption> {}
+export const MetadataOption = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  imageUrl: optional(Schema.String),
+}).annotate({ identifier: "IssueWatcher.MetadataOption" })
+
+export interface Metadata extends Schema.Schema.Type<typeof Metadata> {}
+export const Metadata = Schema.Struct({
+  projects: Schema.Array(MetadataProject),
+  users: Schema.Array(MetadataOption),
+  labels: Schema.Array(Schema.String),
+  statuses: Schema.Array(MetadataOption),
+  components: Schema.Array(MetadataOption),
+  issueTypes: Schema.Array(MetadataOption),
+  fields: Schema.Array(MetadataOption),
+}).annotate({ identifier: "IssueWatcher.Metadata" })
+
 export interface VerificationInput extends Schema.Schema.Type<typeof VerificationInput> {}
 export const VerificationInput = Schema.Struct({
   key: optional(Schema.String),

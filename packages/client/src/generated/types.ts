@@ -501,6 +501,27 @@ export type IssueWatchersRotateConnectionOutput = {
   readonly owner: { readonly status: "active" | "owner_conflict" | "disabled"; readonly detail?: string }
 }
 
+export type IssueWatchersMetadataInput = {
+  readonly integrationID: { readonly integrationID: string; readonly connectionID: string }["integrationID"]
+  readonly connectionID: { readonly integrationID: string; readonly connectionID: string }["connectionID"]
+  readonly issueProjects: { readonly issueProjects: ReadonlyArray<string> }["issueProjects"]
+}
+
+export type IssueWatchersMetadataOutput = {
+  readonly projects: ReadonlyArray<{
+    readonly id: string
+    readonly key: string
+    readonly name: string
+    readonly imageUrl?: string
+  }>
+  readonly users: ReadonlyArray<{ readonly id: string; readonly name: string; readonly imageUrl?: string }>
+  readonly labels: ReadonlyArray<string>
+  readonly statuses: ReadonlyArray<{ readonly id: string; readonly name: string; readonly imageUrl?: string }>
+  readonly components: ReadonlyArray<{ readonly id: string; readonly name: string; readonly imageUrl?: string }>
+  readonly issueTypes: ReadonlyArray<{ readonly id: string; readonly name: string; readonly imageUrl?: string }>
+  readonly fields: ReadonlyArray<{ readonly id: string; readonly name: string; readonly imageUrl?: string }>
+}
+
 export type IssueWatchersPreviewInput = {
   readonly integrationID: {
     readonly integrationID: string

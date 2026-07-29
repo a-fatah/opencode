@@ -90,8 +90,8 @@ export function InboxPage() {
   })
 
   return (
-    <main class="h-full min-h-0 overflow-auto bg-v2-background-bg-deep text-v2-text-text-base">
-      <div class="mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-6 md:px-10 md:py-8">
+    <main class="h-full min-h-0 w-full min-w-0 overflow-auto bg-v2-background-bg-deep text-v2-text-text-base">
+      <div class="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 md:px-10 md:py-8">
         <header class="flex flex-col items-stretch gap-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
           <div>
             <p class="text-12-medium uppercase tracking-[0.14em] text-v2-text-text-muted">Issue watchers</p>
@@ -182,7 +182,7 @@ function InboxRow(props: { item: InboxItem; divided: boolean }) {
           <p class="mt-1 text-11-regular text-v2-text-text-muted">{props.item.watcherName} · {relativeTime(props.item.match.timeUpdated)} · {project()}</p>
         </div>
       </div>
-      <div class="flex w-full flex-wrap items-center gap-2 md:w-auto md:shrink-0">
+      <div class="flex w-full flex-wrap items-center gap-2 md:w-auto md:shrink-0 md:justify-end">
         <span class="rounded-full bg-v2-background-bg-surface px-2 py-1 text-11-medium capitalize text-v2-text-text-muted">{state()}</span>
         <For each={inboxActions(state())}>{(action, index) => <ButtonV2 variant={index() === 0 ? "outline" : "ghost"} disabled>{action}</ButtonV2>}</For>
       </div>

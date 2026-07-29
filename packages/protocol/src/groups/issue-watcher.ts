@@ -68,6 +68,14 @@ export const IssueWatcherGroup = HttpApiGroup.make("server.issueWatcher")
     }).annotateMerge(OpenApi.annotations({ identifier: "v2.issueWatcher.integration.rotate", summary: "Rotate issue source credentials" })),
   )
   .add(
+    HttpApiEndpoint.post("issueWatcher.metadata", "/api/issue-watcher/integrations/:integrationID/connection/:connectionID/metadata", {
+      params: { integrationID: Integration.ID, connectionID: IssueWatcher.ConnectionID },
+      payload: IssueWatcher.MetadataInput,
+      success: IssueWatcher.Metadata,
+      error: SourceErrors,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.issueWatcher.integration.metadata", summary: "List issue source metadata" })),
+  )
+  .add(
     HttpApiEndpoint.post("issueWatcher.preview", "/api/issue-watcher/preview", {
       payload: IssueWatcher.PreviewInput,
       success: IssueWatcher.Preview,

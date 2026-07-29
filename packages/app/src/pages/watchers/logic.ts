@@ -98,6 +98,16 @@ export function canPreview(draft: WatcherDraft) {
   return !!draft.integrationID && !!draft.connectionID
 }
 
+export function hasPreviewCriteria(draft: WatcherDraft) {
+  return !!(
+    draft.criteria.issueProjects.length ||
+    draft.criteria.assignee ||
+    draft.criteria.labels?.length ||
+    draft.criteria.statuses?.length ||
+    draft.criteria.escape?.query.trim()
+  )
+}
+
 export function canSave(draft: WatcherDraft) {
   return canPreview(draft) && !!draft.name.trim() && !!draft.action.promptTemplate.trim()
 }

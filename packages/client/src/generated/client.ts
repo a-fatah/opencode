@@ -7,6 +7,8 @@ import type {
   IssueWatchersCreateConnectionOutput,
   IssueWatchersRotateConnectionInput,
   IssueWatchersRotateConnectionOutput,
+  IssueWatchersMetadataInput,
+  IssueWatchersMetadataOutput,
   IssueWatchersPreviewInput,
   IssueWatchersPreviewOutput,
   IssueWatchersGetSettingsOutput,
@@ -341,6 +343,18 @@ export function make(options: ClientOptions) {
             body: { key: input["key"], inputs: input["inputs"], label: input["label"] },
             successStatus: 200,
             declaredStatuses: [400, 404, 401, 502, 409],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      metadata: (input: IssueWatchersMetadataInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersMetadataOutput>(
+          {
+            method: "POST",
+            path: `/api/issue-watcher/integrations/${encodeURIComponent(input.integrationID)}/connection/${encodeURIComponent(input.connectionID)}/metadata`,
+            body: { issueProjects: input["issueProjects"] },
+            successStatus: 200,
+            declaredStatuses: [400, 404, 401, 502],
             empty: false,
           },
           requestOptions,

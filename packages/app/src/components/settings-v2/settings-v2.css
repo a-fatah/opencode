@@ -727,3 +727,20 @@
   line-height: 1;
   color: var(--v2-state-fg-danger);
 }
+
+.settings-v2-integrations { gap: 32px; }
+.settings-v2-integration-row { display: flex; align-items: center; gap: 16px; padding-block: 20px; border-bottom: 0.5px solid var(--v2-border-border-base); }
+.settings-v2-integration-row:last-child { border-bottom: 0; }
+.settings-v2-integration-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 6px; }
+.settings-v2-integration-main { display: flex; align-items: center; gap: 8px; }
+.settings-v2-integration-health { padding: 3px 6px; border-radius: 999px; font-size: 11px; color: var(--v2-text-text-muted); background: var(--v2-background-bg-layer-02); }
+.settings-v2-integration-health--connected { color: var(--v2-state-fg-success); }
+.settings-v2-integration-health--needs_auth { color: var(--v2-state-fg-warning); }
+.settings-v2-integration-health--not_connected { color: var(--v2-text-text-faint); }
+.settings-v2-integration-meta { font-size: 11px; line-height: 16px; color: var(--v2-text-text-faint); }
+[data-component="dialog-v2"].settings-v2-source-dialog [data-slot="dialog-container"] { width: 480px; max-width: calc(100vw - 32px); height: auto; border-radius: 8px; align-items: stretch; }
+.settings-v2-source-dialog-body { display: flex; width: 100%; min-width: 0; flex-direction: column; align-items: stretch; gap: 16px; padding: 20px 24px; }
+.settings-v2-source-dialog-field { display: flex; flex-direction: column; gap: 8px; }
+.settings-v2-source-dialog-hint, .settings-v2-source-dialog-error, .settings-v2-source-dialog-success { font-size: 11px; line-height: 16px; color: var(--v2-text-text-muted); }
+.settings-v2-source-dialog-error { color: var(--v2-state-fg-danger); }
+.settings-v2-source-dialog-success { color: var(--v2-state-fg-success); }

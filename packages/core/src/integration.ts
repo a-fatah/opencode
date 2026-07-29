@@ -156,6 +156,8 @@ export interface Interface extends State.Transformable<Draft> {
       readonly integrationID: ID
       /** Secret entered by the user. */
       readonly key: string
+      /** Answers to the key method's optional prompts. */
+      readonly inputs?: Inputs
       /** User-facing label for the stored credential. */
       readonly label?: string
     }) => Effect.Effect<void, AuthorizationError>
@@ -385,7 +387,7 @@ export const locationLayer = Layer.effect(
         resolve: Effect.fn("Integration.connection.resolve")(function* (connection) {
           if (connection.type === "env") {
             const key = process.env[connection.name]
-            return key ? Credential.Key.make({ type: "key", key }) : undefined
+            return key ? Credential.Key.make({ type: "key", key, inputs: {} }) : undefined
           }
           const credential = yield* credentials.get(connection.id)
           if (!credential) return undefined
@@ -410,7 +412,7 @@ export const locationLayer = Layer.effect(
           yield* credentials.create({
             integrationID: input.integrationID,
             label: input.label,
-            value: Credential.Key.make({ type: "key", key: input.key }),
+            value: Credential.Key.make({ type: "key", key: input.key, inputs: input.inputs ?? {} }),
           })
           yield* events.publish(Event.ConnectionUpdated, { integrationID: input.integrationID })
           yield* events.publish(Event.Updated, {})

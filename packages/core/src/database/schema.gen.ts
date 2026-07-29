@@ -60,6 +60,8 @@ export default {
         CREATE TABLE \`credential\` (
           \`id\` text PRIMARY KEY,
           \`integration_id\` text,
+          \`connection_id\` text,
+          \`tenant_identity\` text,
           \`label\` text NOT NULL,
           \`value\` text NOT NULL,
           \`connector_id\` text,
@@ -403,6 +405,7 @@ export default {
           CONSTRAINT \`fk_session_share_session_id_session_id_fk\` FOREIGN KEY (\`session_id\`) REFERENCES \`session\`(\`id\`) ON DELETE CASCADE
         );
       `)
+      yield* tx.run(`CREATE UNIQUE INDEX \`credential_connection_uidx\` ON \`credential\` (\`connection_id\`);`)
       yield* tx.run(`CREATE UNIQUE INDEX \`event_aggregate_seq_idx\` ON \`event\` (\`aggregate_id\`,\`seq\`);`)
       yield* tx.run(`CREATE INDEX \`event_aggregate_type_seq_idx\` ON \`event\` (\`aggregate_id\`,\`type\`,\`seq\`);`)
       yield* tx.run(

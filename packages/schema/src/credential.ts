@@ -1,8 +1,9 @@
 export * as Credential from "./credential"
 
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { optional } from "./schema"
 import { IntegrationMethodID } from "./integration-id"
+import { IntegrationInputs } from "./integration-inputs"
 import { ascending } from "./identifier"
 import { NonNegativeInt, statics } from "./schema"
 
@@ -11,6 +12,19 @@ export const ID = Schema.String.pipe(
   statics((schema) => ({ create: () => schema.make("cred_" + ascending()) })),
 )
 export type ID = typeof ID.Type
+
+export const ConnectionID = Schema.String.check(Schema.isStartsWith("icn_")).pipe(
+  Schema.brand("Credential.ConnectionID"),
+  statics((schema) => ({ create: () => schema.make("icn_" + ascending()) })),
+)
+export type ConnectionID = typeof ConnectionID.Type
+
+export interface Verification extends Schema.Schema.Type<typeof Verification> {}
+export const Verification = Schema.Struct({
+  status: Schema.Literals(["connected", "needs_auth", "not_connected"]),
+  detail: Schema.String,
+  checkedAt: NonNegativeInt,
+}).annotate({ identifier: "Credential.Verification" })
 
 export interface OAuth extends Schema.Schema.Type<typeof OAuth> {}
 export const OAuth = Schema.Struct({
@@ -26,6 +40,12 @@ export interface Key extends Schema.Schema.Type<typeof Key> {}
 export const Key = Schema.Struct({
   type: Schema.Literal("key"),
   key: Schema.String,
+  inputs: IntegrationInputs.pipe(
+    Schema.optional,
+    Schema.withDecodingDefault(Effect.succeed({})),
+    Schema.withConstructorDefault(Effect.succeed({})),
+  ),
+  verification: optional(Verification),
   metadata: optional(Schema.Record(Schema.String, Schema.Unknown)),
 }).annotate({ identifier: "Credential.Key" })
 

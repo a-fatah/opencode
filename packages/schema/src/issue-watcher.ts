@@ -4,6 +4,7 @@ import { Schema } from "effect"
 import { define, inventory } from "./event"
 import { ascending } from "./identifier"
 import { Integration } from "./integration"
+import { Credential } from "./credential"
 import { IssueMatch } from "./issue-match"
 import { Project } from "./project"
 import { DateTimeUtcFromMillis, NonNegativeInt, optional, statics } from "./schema"
@@ -21,7 +22,7 @@ export const RunID = Schema.String.check(Schema.isStartsWith("iwr_")).pipe(
 )
 export type RunID = typeof RunID.Type
 
-export const ConnectionID = Schema.String.pipe(Schema.brand("IssueWatcher.ConnectionID"))
+export const ConnectionID = Credential.ConnectionID
 export type ConnectionID = typeof ConnectionID.Type
 
 export const Assignee = Schema.Union([
@@ -170,6 +171,70 @@ export const InboxSummary = Schema.Struct({
   sessionsOpenedThisWeek: NonNegativeInt,
   failedRuns: NonNegativeInt,
 }).annotate({ identifier: "IssueWatcher.InboxSummary" })
+
+export interface OwnerStatus extends Schema.Schema.Type<typeof OwnerStatus> {}
+export const OwnerStatus = Schema.Struct({
+  status: Schema.Literals(["active", "owner_conflict", "disabled"]),
+  detail: optional(Schema.String),
+}).annotate({ identifier: "IssueWatcher.OwnerStatus" })
+
+export interface ConnectionSummary extends Schema.Schema.Type<typeof ConnectionSummary> {}
+export const ConnectionSummary = Schema.Struct({
+  id: ConnectionID,
+  label: Schema.String,
+  tenantIdentity: Schema.String,
+  inputs: Integration.Inputs,
+  verification: Credential.Verification,
+}).annotate({ identifier: "IssueWatcher.ConnectionSummary" })
+
+export interface IntegrationSummary extends Schema.Schema.Type<typeof IntegrationSummary> {}
+export const IntegrationSummary = Schema.Struct({
+  integration: Integration.Info,
+  connection: optional(ConnectionSummary),
+  watcherCount: NonNegativeInt,
+  lastPollAt: optional(DateTimeUtcFromMillis),
+  owner: OwnerStatus,
+}).annotate({ identifier: "IssueWatcher.IntegrationSummary" })
+
+export interface VerificationInput extends Schema.Schema.Type<typeof VerificationInput> {}
+export const VerificationInput = Schema.Struct({
+  key: optional(Schema.String),
+  inputs: Integration.Inputs,
+  useSavedConnection: optional(Schema.Boolean),
+}).annotate({ identifier: "IssueWatcher.VerificationInput" })
+
+export interface VerificationResult extends Schema.Schema.Type<typeof VerificationResult> {}
+export const VerificationResult = Schema.Struct({
+  ok: Schema.Boolean,
+  detail: Schema.String,
+}).annotate({ identifier: "IssueWatcher.VerificationResult" })
+
+export interface ConnectionCreateInput extends Schema.Schema.Type<typeof ConnectionCreateInput> {}
+export const ConnectionCreateInput = Schema.Struct({
+  key: Schema.String,
+  inputs: Integration.Inputs,
+  label: optional(Schema.String),
+}).annotate({ identifier: "IssueWatcher.ConnectionCreateInput" })
+
+export interface ConnectionRotateInput extends Schema.Schema.Type<typeof ConnectionRotateInput> {}
+export const ConnectionRotateInput = Schema.Struct({
+  key: optional(Schema.String),
+  inputs: Integration.Inputs,
+  label: optional(Schema.String),
+}).annotate({ identifier: "IssueWatcher.ConnectionRotateInput" })
+
+export interface SettingsInput extends Schema.Schema.Type<typeof SettingsInput> {}
+export const SettingsInput = Schema.Struct({
+  pollInterval: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isGreaterThan(0))),
+  concurrentRuns: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isGreaterThan(0))),
+  retryFailedRuns: Schema.Literals(["never", "once"]),
+}).annotate({ identifier: "IssueWatcher.SettingsInput" })
+
+export interface Settings extends Schema.Schema.Type<typeof Settings> {}
+export const Settings = Schema.Struct({
+  ...SettingsInput.fields,
+  owner: OwnerStatus,
+}).annotate({ identifier: "IssueWatcher.Settings" })
 
 const Updated = define({ type: "issue_watcher.updated", schema: { watcher: Info } })
 const RunCompleted = define({ type: "issue_watcher.run.completed", schema: { run: Run } })

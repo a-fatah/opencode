@@ -10,6 +10,8 @@ import { GlobalConfig } from "./global-config"
 import { IssueProvider } from "./issue-watcher/provider"
 import { IssueWatcherOwner } from "./issue-watcher/owner"
 import { IssueWatcherTable } from "./issue-watcher/sql"
+import { Credential } from "./credential"
+import { Integration } from "@opencode-ai/schema/integration"
 
 export const ID = IssueWatcher.ID
 export type ID = IssueWatcher.ID
@@ -33,6 +35,25 @@ export class OwnerConflictError extends Schema.TaggedErrorClass<OwnerConflictErr
   detail: Schema.String,
 }) {}
 
+export class SourceNotFoundError extends Schema.TaggedErrorClass<SourceNotFoundError>()("IssueWatcher.SourceNotFoundError", {
+  integrationID: Integration.ID,
+}) {}
+
+export class ConnectionNotFoundError extends Schema.TaggedErrorClass<ConnectionNotFoundError>()(
+  "IssueWatcher.ConnectionNotFoundError",
+  { connectionID: Credential.ConnectionID },
+) {}
+
+export class TenantConflictError extends Schema.TaggedErrorClass<TenantConflictError>()(
+  "IssueWatcher.TenantConflictError",
+  { connectionID: Credential.ConnectionID },
+) {}
+
+export class VerificationModeError extends Schema.TaggedErrorClass<VerificationModeError>()(
+  "IssueWatcher.VerificationModeError",
+  { detail: Schema.String },
+) {}
+
 export type Error = NotFoundError | ArchivedError | OwnerConflictError
 
 export interface Interface {
@@ -43,6 +64,33 @@ export interface Interface {
   readonly update: (id: ID, input: UpdateInput) => Effect.Effect<Info, NotFoundError | ArchivedError>
   readonly archive: (id: ID) => Effect.Effect<void, NotFoundError>
   readonly enable: (id: ID, enabled: boolean) => Effect.Effect<Info, Error>
+  readonly source: {
+    readonly list: () => Effect.Effect<IssueWatcher.IntegrationSummary[]>
+    readonly verify: (
+      integrationID: Integration.ID,
+      input: IssueWatcher.VerificationInput,
+    ) => Effect.Effect<
+      IssueWatcher.VerificationResult,
+      SourceNotFoundError | ConnectionNotFoundError | VerificationModeError
+    >
+    readonly create: (
+      integrationID: Integration.ID,
+      input: IssueWatcher.ConnectionCreateInput,
+    ) => Effect.Effect<IssueWatcher.IntegrationSummary, SourceNotFoundError | IssueProvider.Error>
+    readonly rotate: (
+      integrationID: Integration.ID,
+      connectionID: Credential.ConnectionID,
+      input: IssueWatcher.ConnectionRotateInput,
+    ) => Effect.Effect<
+      IssueWatcher.IntegrationSummary,
+      SourceNotFoundError | ConnectionNotFoundError | TenantConflictError | IssueProvider.Error
+    >
+  }
+  readonly summary: () => Effect.Effect<IssueWatcher.InboxSummary>
+  readonly settings: {
+    readonly get: () => Effect.Effect<IssueWatcher.Settings>
+    readonly update: (input: IssueWatcher.SettingsInput) => Effect.Effect<IssueWatcher.Settings>
+  }
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/IssueWatcher") {}
@@ -53,6 +101,9 @@ const layer = Layer.effect(
     const { db } = yield* Database.Service
     const events = yield* EventV2.Service
     const owner = yield* IssueWatcherOwner.Service
+    const providers = yield* IssueProvider.Service
+    const credentials = yield* Credential.Service
+    const config = yield* GlobalConfig.Service
     const decode = Schema.decodeUnknownSync(Info)
 
     const stored = (row: typeof IssueWatcherTable.$inferSelect) => decode({
@@ -80,6 +131,67 @@ const layer = Layer.effect(
     })
 
     const publish = (watcher: Info) => events.publish(Event.Updated, { watcher }).pipe(Effect.asVoid)
+
+    const ownerStatus = () => owner.status()
+
+    const provider = Effect.fnUntraced(function* (integrationID: Integration.ID) {
+      const adapter = yield* providers.get(integrationID)
+      if (!adapter) return yield* new SourceNotFoundError({ integrationID })
+      return adapter
+    })
+
+    const connection = Effect.fnUntraced(function* (connectionID: Credential.ConnectionID) {
+      const credential = yield* credentials.getConnection(connectionID)
+      if (!credential || credential.value.type !== "key") return yield* new ConnectionNotFoundError({ connectionID })
+      return credential
+    })
+
+    const projectSource = Effect.fnUntraced(function* (adapter: IssueProvider.Adapter) {
+      const saved = (yield* credentials.list(adapter.integrationID)).toReversed().find(
+        (credential) => credential.connectionID && credential.value.type === "key",
+      )
+      const watchers = (yield* db
+        .select()
+        .from(IssueWatcherTable)
+        .where(and(eq(IssueWatcherTable.integration_id, adapter.integrationID), isNull(IssueWatcherTable.archived_at)))
+        .all()
+        .pipe(Effect.orDie)).map(stored)
+      return Schema.decodeUnknownSync(IssueWatcher.IntegrationSummary)({
+        integration: {
+          id: adapter.integrationID,
+          name: adapter.name,
+          methods: [adapter.method],
+          connections: saved ? [{ type: "credential", id: saved.id, label: saved.label }] : [],
+        },
+        ...(saved?.connectionID && saved.tenantIdentity && saved.value.type === "key" && saved.value.verification
+          ? {
+              connection: {
+                id: saved.connectionID,
+                label: saved.label,
+                tenantIdentity: saved.tenantIdentity,
+                inputs: saved.value.inputs,
+                verification: saved.value.verification,
+              },
+            }
+          : {}),
+        watcherCount: watchers.length,
+        ...(watchers.flatMap((watcher) => (watcher.lastRunAt ? [watcher.lastRunAt] : [])).toSorted().at(-1)
+          ? { lastPollAt: watchers.flatMap((watcher) => (watcher.lastRunAt ? [watcher.lastRunAt] : [])).toSorted().at(-1) }
+          : {}),
+        owner: ownerStatus(),
+      })
+    })
+
+    const verifyCredential = Effect.fnUntraced(function* (adapter: IssueProvider.Adapter, value: Credential.Key) {
+      const result = yield* adapter.verify(value)
+      return {
+        result,
+        value: Credential.Key.make({
+          ...value,
+          verification: { status: "connected", detail: result.detail, checkedAt: Date.now() },
+        }),
+      }
+    })
 
     return Service.of({
       status: owner.status,
@@ -168,6 +280,97 @@ const layer = Layer.effect(
         yield* publish(watcher)
         return watcher
       }),
+      source: {
+        list: Effect.fn("IssueWatcher.source.list")(function* () {
+          return yield* Effect.forEach(yield* providers.list(), projectSource)
+        }),
+        verify: Effect.fn("IssueWatcher.source.verify")(function* (integrationID, input) {
+          const adapter = yield* provider(integrationID)
+          const savedMode = input.useSavedConnection === true
+          if (savedMode === (input.key !== undefined)) {
+            return yield* new VerificationModeError({ detail: "Supply either a key or useSavedConnection" })
+          }
+          if (!savedMode) {
+            return yield* adapter
+              .verify(Credential.Key.make({ type: "key", key: input.key ?? "", inputs: input.inputs }))
+              .pipe(Effect.catch(() => Effect.succeed({ ok: false, detail: "Verification failed" })))
+          }
+          const saved = (yield* credentials.list(integrationID)).toReversed().find(
+            (credential) => credential.connectionID && credential.value.type === "key",
+          )
+          if (!saved?.connectionID || saved.value.type !== "key") {
+            return yield* new ConnectionNotFoundError({ connectionID: Credential.ConnectionID.make("icn_missing") })
+          }
+          const checkedAt = Date.now()
+          const result = yield* adapter.verify(saved.value).pipe(
+            Effect.map((value) => ({ result: value, status: "connected" as const })),
+            Effect.catch(() =>
+              Effect.succeed({ result: { ok: false, detail: "Verification failed" }, status: "needs_auth" as const }),
+            ),
+          )
+          yield* credentials.rotateConnection(saved.connectionID, {
+            value: Credential.Key.make({
+              ...saved.value,
+              verification: { status: result.status, detail: result.result.detail, checkedAt },
+            }),
+          }).pipe(Effect.mapError(() => new ConnectionNotFoundError({ connectionID: saved.connectionID! })))
+          return result.result
+        }),
+        create: Effect.fn("IssueWatcher.source.create")(function* (integrationID, input) {
+          const adapter = yield* provider(integrationID)
+          const tenantIdentity = yield* adapter.tenantIdentity(input.inputs)
+          const verified = yield* verifyCredential(
+            adapter,
+            Credential.Key.make({ type: "key", key: input.key, inputs: input.inputs }),
+          )
+          yield* credentials.createConnection({
+            integrationID,
+            connectionID: Credential.ConnectionID.create(),
+            tenantIdentity,
+            value: verified.value,
+            label: input.label,
+          })
+          return yield* projectSource(adapter)
+        }),
+        rotate: Effect.fn("IssueWatcher.source.rotate")(function* (integrationID, connectionID, input) {
+          const adapter = yield* provider(integrationID)
+          const saved = yield* connection(connectionID)
+          if (saved.integrationID !== integrationID) return yield* new ConnectionNotFoundError({ connectionID })
+          if (saved.value.type !== "key") return yield* new ConnectionNotFoundError({ connectionID })
+          if ((yield* adapter.tenantIdentity(input.inputs)) !== saved.tenantIdentity) {
+            return yield* new TenantConflictError({ connectionID })
+          }
+          const verified = yield* verifyCredential(
+            adapter,
+            Credential.Key.make({ type: "key", key: input.key ?? saved.value.key, inputs: input.inputs }),
+          )
+          yield* credentials
+            .rotateConnection(connectionID, { value: verified.value, label: input.label })
+            .pipe(Effect.mapError(() => new ConnectionNotFoundError({ connectionID })))
+          return yield* projectSource(adapter)
+        }),
+      },
+      summary: Effect.fn("IssueWatcher.summary")(function* () {
+        return Schema.decodeUnknownSync(IssueWatcher.InboxSummary)({
+          pending: 0,
+          unrouted: 0,
+          duplicate: 0,
+          failedMaterializations: 0,
+          sessionsOpenedThisWeek: 0,
+          failedRuns: 0,
+        })
+      }),
+      settings: {
+        get: Effect.fn("IssueWatcher.settings.get")(function* () {
+          return Schema.decodeUnknownSync(IssueWatcher.Settings)({ ...(yield* config.getIssueWatcher()), owner: ownerStatus() })
+        }),
+        update: Effect.fn("IssueWatcher.settings.update")(function* (input) {
+          return Schema.decodeUnknownSync(IssueWatcher.Settings)({
+            ...(yield* config.updateIssueWatcher(input)),
+            owner: ownerStatus(),
+          })
+        }),
+      },
     })
   }),
 )
@@ -175,5 +378,5 @@ const layer = Layer.effect(
 export const node = makeGlobalNode({
   service: Service,
   layer,
-  deps: [Database.node, EventV2.node, GlobalConfig.node, IssueProvider.node, IssueWatcherOwner.node],
+  deps: [Database.node, EventV2.node, GlobalConfig.node, Credential.node, IssueProvider.node, IssueWatcherOwner.node],
 })

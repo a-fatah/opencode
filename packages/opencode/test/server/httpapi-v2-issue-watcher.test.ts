@@ -12,7 +12,7 @@ function request(route: string, init: RequestInit = {}) {
 
 const input = {
   integrationID: "jira",
-  connectionID: "connection-1",
+  connectionID: "icn_connection-1",
   name: "API issues",
   enabled: false,
   criteria: {
@@ -58,6 +58,37 @@ afterEach(async () => {
 })
 
 describe("v2 issue watcher HttpApi", () => {
+  test("exposes location-free Jira sources and watcher settings", async () => {
+    const sources = await request("/api/issue-watcher/integrations")
+    expect(sources.status).toBe(200)
+    expect(await sources.json()).toEqual([
+      expect.objectContaining({
+        integration: expect.objectContaining({
+          id: "jira",
+          name: "Jira",
+          methods: [expect.objectContaining({ type: "key", prompts: expect.any(Array) })],
+        }),
+        watcherCount: 0,
+        owner: { status: "active" },
+      }),
+    ])
+
+    const settings = await request("/api/issue-watcher/settings")
+    expect(settings.status).toBe(200)
+    expect(await settings.json()).toEqual({
+      pollInterval: 120,
+      concurrentRuns: 3,
+      retryFailedRuns: "once",
+      owner: { status: "active" },
+    })
+
+    const invalid = await request(
+      "/api/issue-watcher/integrations/jira/verify",
+      json("POST", { key: "secret", inputs: {}, useSavedConnection: true }),
+    )
+    expect(invalid.status).toBe(400)
+  })
+
   test("manages global watchers without location transport", async () => {
     const route = "/api/issue-watcher/watchers"
     const empty = await request(route)

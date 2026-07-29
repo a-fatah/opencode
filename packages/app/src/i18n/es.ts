@@ -1,4 +1,7 @@
+import { integrationStrings } from "./integrations"
+
 export const dict = {
+  ...integrationStrings,
   "command.category.suggested": "Sugerido",
   "command.category.view": "Ver",
   "command.category.project": "Proyecto",

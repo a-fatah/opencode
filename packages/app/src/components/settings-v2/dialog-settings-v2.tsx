@@ -8,16 +8,21 @@ import { SettingsGeneralV2 } from "./general"
 import { SettingsKeybinds } from "../settings-keybinds"
 import { SettingsProvidersV2 } from "./providers"
 import { SettingsModelsV2 } from "./models"
+import { SettingsIntegrationsV2 } from "./integrations"
 import "./settings-v2.css"
 import { SettingsServersV2 } from "./servers"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useLayout } from "@/context/layout"
 import { useTabs } from "@/context/tabs"
 import { useServerSync } from "@/context/server-sync"
+import { ServerConnection } from "@/context/server"
+import { ServerSDKProvider } from "@/context/server-sdk"
+import { useGlobal } from "@/context/global"
 
 export const DialogSettings: Component<{
   sessionID?: string
   defaultValue?: string
+  serverKey?: ServerConnection.Key
 }> = (props) => {
   const language = useLanguage()
   const platform = usePlatform()
@@ -25,6 +30,7 @@ export const DialogSettings: Component<{
   const layout = useLayout()
   const tabs = useTabs()
   const serverSync = useServerSync()
+  const global = useGlobal()
   const [tab, setTab] = createSignal(props.defaultValue ?? "general")
   const directory = createMemo(() => {
     const route = layout.route()
@@ -36,6 +42,9 @@ export const DialogSettings: Component<{
     if (route.type === "session") return serverSync().session.get(route.sessionId)?.directory
     return undefined
   })
+  const integrationsServer = createMemo(() =>
+    global.servers.list().find((conn) => ServerConnection.key(conn) === props.serverKey),
+  )
 
   const showProviders = () => {
     void dialog.show(() => <DialogSettings sessionID={props.sessionID} defaultValue="providers" />)
@@ -83,6 +92,10 @@ export const DialogSettings: Component<{
                       <Icon name="models" />
                       {language.t("settings.models.title")}
                     </TabsV2.Trigger>
+                    <TabsV2.Trigger value="integrations">
+                      <Icon name="mcp" />
+                      {language.t("settings.integrations.title")}
+                    </TabsV2.Trigger>
                   </div>
                 </div>
               </div>
@@ -107,6 +120,11 @@ export const DialogSettings: Component<{
         </TabsV2.Content>
         <TabsV2.Content value="models" class="settings-v2-panel">
           <SettingsModelsV2 />
+        </TabsV2.Content>
+        <TabsV2.Content value="integrations" class="settings-v2-panel">
+          <ServerSDKProvider server={integrationsServer}>
+            <SettingsIntegrationsV2 />
+          </ServerSDKProvider>
         </TabsV2.Content>
       </TabsV2>
     </Dialog>

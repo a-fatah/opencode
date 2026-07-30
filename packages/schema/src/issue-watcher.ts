@@ -235,6 +235,7 @@ export const InboxItem = Schema.Struct({
   watcherName: Schema.String,
   project: optional(Schema.Struct({ id: Project.ID, name: Schema.String })),
   suggestion: optional(Schema.Struct({ id: Project.ID, name: Schema.String })),
+  materialization: optional(Schema.suspend(() => IssueMatch.Materialization)),
 }).annotate({ identifier: "IssueWatcher.InboxItem" })
 
 export const PageCursor = Schema.String.pipe(Schema.brand("IssueWatcher.PageCursor"))
@@ -265,6 +266,105 @@ export const InboxSummary = Schema.Struct({
   failedRuns: NonNegativeInt,
 }).annotate({ identifier: "IssueWatcher.InboxSummary" })
 
+export interface MaterializeInput extends Schema.Schema.Type<typeof MaterializeInput> {}
+export const MaterializeInput = Schema.Struct({
+  mode: Schema.Literals(["run", "awaiting_run"]),
+  projectID: optional(Project.ID),
+  workspace: optional(Workspace),
+}).annotate({ identifier: "IssueWatcher.MaterializeInput" })
+
+export const MaterializeResult = Schema.Union([
+  Schema.Struct({
+    status: Schema.Literal("created"),
+    materializationID: Schema.suspend(() => IssueMatch.MaterializationID),
+    sessionID: SessionID,
+  }),
+  Schema.Struct({ status: Schema.Literal("queued"), reason: Schema.Literal("concurrency_limit") }),
+])
+  .pipe(Schema.toTaggedUnion("status"))
+  .annotate({ identifier: "IssueWatcher.MaterializeResult" })
+export type MaterializeResult = typeof MaterializeResult.Type
+
+export interface RouteInput extends Schema.Schema.Type<typeof RouteInput> {}
+export const RouteInput = Schema.Struct({
+  projectID: Project.ID,
+  persistMapping: optional(Schema.Boolean),
+}).annotate({ identifier: "IssueWatcher.RouteInput" })
+
+export interface IgnoreInput extends Schema.Schema.Type<typeof IgnoreInput> {}
+export const IgnoreInput = Schema.Struct({
+  externalID: Schema.String,
+  reason: optional(Schema.String),
+}).annotate({ identifier: "IssueWatcher.IgnoreInput" })
+
+export interface BulkInput extends Schema.Schema.Type<typeof BulkInput> {}
+export const BulkInput = Schema.Struct({
+  matchIDs: Schema.Array(Schema.suspend(() => IssueMatch.ID)),
+  action: Schema.Literals(["approve", "skip", "dismiss"]),
+  mode: optional(Schema.Literals(["run", "awaiting_run"])),
+}).annotate({ identifier: "IssueWatcher.BulkInput" })
+
+export interface BulkError extends Schema.Schema.Type<typeof BulkError> {}
+export const BulkError = Schema.Struct({
+  code: Schema.Literals(["not_found", "invalid_state", "unrouted", "duplicate", "materialization_failed"]),
+  message: Schema.String,
+}).annotate({ identifier: "IssueWatcher.BulkError" })
+
+export const BulkItem = Schema.Union([
+  Schema.Struct({
+    status: Schema.Literal("succeeded"),
+    matchID: Schema.suspend(() => IssueMatch.ID),
+    materialization: optional(MaterializeResult),
+  }),
+  Schema.Struct({
+    status: Schema.Literal("failed"),
+    matchID: Schema.suspend(() => IssueMatch.ID),
+    error: BulkError,
+  }),
+])
+  .pipe(Schema.toTaggedUnion("status"))
+  .annotate({ identifier: "IssueWatcher.BulkItem" })
+export type BulkItem = typeof BulkItem.Type
+
+export interface BulkResult extends Schema.Schema.Type<typeof BulkResult> {}
+export const BulkResult = Schema.Struct({ items: Schema.Array(BulkItem) }).annotate({
+  identifier: "IssueWatcher.BulkResult",
+})
+
+export interface IssueDiff extends Schema.Schema.Type<typeof IssueDiff> {}
+export const IssueDiff = Schema.Struct({
+  field: Schema.String,
+  before: optional(Schema.Json),
+  after: optional(Schema.Json),
+}).annotate({ identifier: "IssueWatcher.IssueDiff" })
+
+export interface DuplicateDetail extends Schema.Schema.Type<typeof DuplicateDetail> {}
+export const DuplicateDetail = Schema.Struct({
+  match: Schema.suspend(() => IssueMatch.Info),
+  baseline: Schema.suspend(() => IssueMatch.Observation),
+  current: Schema.suspend(() => IssueMatch.Observation),
+  sessions: Schema.Array(Schema.suspend(() => IssueMatch.SessionLink)),
+  primary: optional(Schema.suspend(() => IssueMatch.SessionLink)),
+  diff: Schema.Array(IssueDiff),
+}).annotate({ identifier: "IssueWatcher.DuplicateDetail" })
+
+export interface DuplicateResolutionInput extends Schema.Schema.Type<typeof DuplicateResolutionInput> {}
+export const DuplicateResolutionInput = Schema.Struct({
+  action: Schema.Literals(["continue", "create_second", "ignore"]),
+  mode: optional(Schema.Literals(["run", "awaiting_run"])),
+  projectID: optional(Project.ID),
+  workspace: optional(Workspace),
+}).annotate({ identifier: "IssueWatcher.DuplicateResolutionInput" })
+
+export const DuplicateResolutionResult = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("continued"), sessionID: SessionID }),
+  MaterializeResult,
+  Schema.Struct({ status: Schema.Literal("ignored") }),
+])
+  .pipe(Schema.toTaggedUnion("status"))
+  .annotate({ identifier: "IssueWatcher.DuplicateResolutionResult" })
+export type DuplicateResolutionResult = typeof DuplicateResolutionResult.Type
+
 export interface OwnerStatus extends Schema.Schema.Type<typeof OwnerStatus> {}
 export const OwnerStatus = Schema.Struct({
   status: Schema.Literals(["active", "owner_conflict", "disabled"]),
@@ -288,6 +388,37 @@ export const IntegrationSummary = Schema.Struct({
   lastPollAt: optional(DateTimeUtcFromMillis),
   owner: OwnerStatus,
 }).annotate({ identifier: "IssueWatcher.IntegrationSummary" })
+
+export interface MetadataInput extends Schema.Schema.Type<typeof MetadataInput> {}
+export const MetadataInput = Schema.Struct({
+  issueProjects: Schema.Array(Schema.String),
+}).annotate({ identifier: "IssueWatcher.MetadataInput" })
+
+export interface MetadataProject extends Schema.Schema.Type<typeof MetadataProject> {}
+export const MetadataProject = Schema.Struct({
+  id: Schema.String,
+  key: Schema.String,
+  name: Schema.String,
+  imageUrl: optional(Schema.String),
+}).annotate({ identifier: "IssueWatcher.MetadataProject" })
+
+export interface MetadataOption extends Schema.Schema.Type<typeof MetadataOption> {}
+export const MetadataOption = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  imageUrl: optional(Schema.String),
+}).annotate({ identifier: "IssueWatcher.MetadataOption" })
+
+export interface Metadata extends Schema.Schema.Type<typeof Metadata> {}
+export const Metadata = Schema.Struct({
+  projects: Schema.Array(MetadataProject),
+  users: Schema.Array(MetadataOption),
+  labels: Schema.Array(Schema.String),
+  statuses: Schema.Array(MetadataOption),
+  components: Schema.Array(MetadataOption),
+  issueTypes: Schema.Array(MetadataOption),
+  fields: Schema.Array(MetadataOption),
+}).annotate({ identifier: "IssueWatcher.Metadata" })
 
 export interface VerificationInput extends Schema.Schema.Type<typeof VerificationInput> {}
 export const VerificationInput = Schema.Struct({

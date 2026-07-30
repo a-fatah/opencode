@@ -10,6 +10,8 @@ import type { AppSessionStatus } from "@/utils/session"
 import { showToast } from "@/utils/toast"
 import {
   awaitingRunLocked,
+  awaitingRunPromptState,
+  clearedAwaitingRunState,
   confirmationPair,
   createAwaitingRunApi,
   createExecutionAttemptID,
@@ -35,6 +37,8 @@ export function AwaitingRunPanel(props: {
   current: () => ComposerPrompt
   setPrompt: (prompt: ComposerPrompt, cursor?: number) => void
   refreshSession: () => Promise<unknown>
+  branch?: string
+  workspace?: string
 }) {
   const queryClient = useQueryClient()
   const [state, setState] = props.state
@@ -72,7 +76,7 @@ export function AwaitingRunPanel(props: {
     const value = pendingHydration(state, text(), input)
     if (value === undefined) return
     props.setPrompt([{ type: "text", content: value, start: 0, end: value.length }], value.length)
-    setState({ hydratedID: input.id, sourceText: value })
+    setState(awaitingRunPromptState(input, value))
   })
 
   const refresh = () => {
@@ -96,7 +100,7 @@ export function AwaitingRunPanel(props: {
       if (!input || state.locked) return
       const prompt: Prompt = { ...input.prompt, text: text() }
       const result = await api().replace(props.sessionID, input.id, prompt)
-      setState({ hydratedID: result.id, sourceText: result.prompt.text })
+      setState(awaitingRunPromptState(result, result.prompt.text))
       refresh()
     },
     onError: fail,
@@ -107,6 +111,8 @@ export function AwaitingRunPanel(props: {
       if (!input || state.locked) return
       setState("locked", true)
       await api().cancel(props.sessionID, input.id)
+      props.setPrompt([])
+      setState(clearedAwaitingRunState())
       refresh()
     },
     onError: (error) => {
@@ -129,7 +135,8 @@ export function AwaitingRunPanel(props: {
         prompt: { ...input.prompt, text: text() },
         attemptID,
       })
-      setState({ hydratedID: result.id, sourceText: result.prompt.text })
+      props.setPrompt([])
+      setState(clearedAwaitingRunState())
       refresh()
     },
     onError: (error) => {
@@ -183,16 +190,25 @@ export function AwaitingRunPanel(props: {
             <div>
               <p class="text-14-medium text-v2-text-text-strong">Awaiting run</p>
               <p class="mt-1 text-12-regular text-v2-text-text-muted">Review and save the prompt before starting the agent.</p>
+              <Show when={props.branch || props.workspace}>
+                <p class="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-11-regular text-v2-text-text-muted">
+                  <Show when={props.branch}><span>Branch: {props.branch}</span></Show>
+                  <Show when={props.workspace}><span class="truncate" title={props.workspace}>Workspace: {props.workspace}</span></Show>
+                </p>
+              </Show>
             </div>
-            <TextareaV2
-              rows={6}
-              value={text()}
-              disabled={state.locked || pending.isPending || pending.isError}
-              onInput={(event) => {
-                const value = event.currentTarget.value
-                props.setPrompt([{ type: "text", content: value, start: 0, end: value.length }], value.length)
-              }}
-            />
+            <label class="flex flex-col gap-2 text-12-medium text-v2-text-text-muted">
+              Prompt
+              <TextareaV2
+                rows={6}
+                value={text()}
+                disabled={state.locked || pending.isPending || pending.isError}
+                onInput={(event) => {
+                  const value = event.currentTarget.value
+                  props.setPrompt([{ type: "text", content: value, start: 0, end: value.length }], value.length)
+                }}
+              />
+            </label>
             <Show when={pending.error}>
               {(error) => <p class="text-12-regular text-v2-text-text-danger">{String(error())}</p>}
             </Show>

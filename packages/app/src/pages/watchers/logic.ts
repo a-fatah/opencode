@@ -98,29 +98,50 @@ export function canPreview(draft: WatcherDraft) {
   return !!draft.integrationID && !!draft.connectionID
 }
 
+export function hasPreviewCriteria(draft: WatcherDraft) {
+  return !!(
+    draft.criteria.issueProjects.length ||
+    draft.criteria.assignee ||
+    draft.criteria.labels?.length ||
+    draft.criteria.statuses?.length ||
+    draft.criteria.escape?.query.trim()
+  )
+}
+
 export function canSave(draft: WatcherDraft) {
   return canPreview(draft) && !!draft.name.trim() && !!draft.action.promptTemplate.trim()
 }
 
 export type InboxFilter = "all" | "attention" | "dismissed" | `source:${string}`
+export type InboxState = "pending" | "skipped" | "dismissed" | "duplicate" | "unrouted"
+export type InboxBulkAction = "approve" | "skip" | "dismiss"
 
 export function inboxQuery(filter: InboxFilter) {
-  if (filter === "attention") return { attention: true as const }
+  if (filter === "attention") return { filter: "attention" as const }
   if (filter === "dismissed") return { state: "dismissed" as const }
   if (filter.startsWith("source:")) return { integrationID: filter.slice("source:".length) }
   return {}
 }
 
-export function inboxActions(state: "pending" | "skipped" | "dismissed" | "duplicate" | "unrouted") {
+export function inboxActions(state: InboxState) {
   if (state === "unrouted") return ["Pick project", "Skip"] as const
   if (state === "duplicate") return ["Open session", "Dismiss"] as const
-  if (state === "pending") return ["Create & run", "Awaiting run", "Skip"] as const
-  if (state === "skipped") return ["Create & run", "Skipped"] as const
-  return ["Create & run", "Dismissed"] as const
+  if (state === "pending") return ["Create & run", "Awaiting run", "Skip", "Dismiss"] as const
+  return [] as const
 }
 
 export function inboxAttentionCount(summary: { readonly unrouted: number; readonly duplicate: number; readonly failedMaterializations: number }) {
-  return summary.unrouted + summary.duplicate
+  return summary.unrouted + summary.duplicate + summary.failedMaterializations
+}
+
+export function selectableInboxItem(state: InboxState) {
+  return state === "pending" || state === "unrouted" || state === "duplicate"
+}
+
+export function inboxBulkActionSupports(action: InboxBulkAction, state: InboxState) {
+  if (action === "approve") return state === "pending"
+  if (action === "skip") return state === "pending" || state === "unrouted"
+  return state === "pending" || state === "duplicate"
 }
 
 export function authExpiredMessage(source: string, watcher: string) {

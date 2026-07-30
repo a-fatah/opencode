@@ -251,7 +251,7 @@ window.ISSUE_WATCHER_PLAN = {
       id: "wave-6",
       number: 6,
       name: "Session Materialization",
-      status: "planned",
+      status: "complete",
       dependsOn: ["wave-4", "wave-5"],
       specSlices: ["Slice 8"],
       objective: "Turn triaged matches into safely linked sessions and optionally schedule execution.",
@@ -259,7 +259,7 @@ window.ISSUE_WATCHER_PLAN = {
       lanes: [
         {
           name: "Materialization core",
-          status: "planned",
+          status: "complete",
           work: [
             "Durable staged materialization with deterministic generations",
             "Cross-watcher primary claim by connection and external issue ID",
@@ -268,7 +268,7 @@ window.ISSUE_WATCHER_PLAN = {
         },
         {
           name: "Execution and duplicates",
-          status: "planned",
+          status: "complete",
           work: [
             "Process-local atomic auto-run gate",
             "Continue, create-second, ignore, cancel, and rematerialize operations",
@@ -277,7 +277,7 @@ window.ISSUE_WATCHER_PLAN = {
         },
         {
           name: "Session UI",
-          status: "planned",
+          status: "complete",
           work: [
             "Inbox actions, project picker, bulk actions, and duplicate dialog",
             "Provenance grouping and status chips in Sessions list",

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionV2Info } from "@opencode-ai/sdk/v2/client"
+import type { AppSessionProvenance } from "@/utils/session"
 import {
   applyHomeSessionEvent,
   appendHomeSessionEvent,
@@ -18,6 +19,7 @@ const session = (input: {
   archived?: number
   updated?: number
   status?: "running" | "handoff_unknown" | "awaiting_run" | "idle"
+  provenance?: AppSessionProvenance
 }) => ({
   id: input.id,
   parentID: input.parentID,
@@ -28,6 +30,7 @@ const session = (input: {
   title: input.id,
   status: input.status ?? "idle",
   location: { directory: input.directory ?? "/project" },
+  provenance: input.provenance,
 })
 
 describe("Home V2 session index", () => {
@@ -80,7 +83,18 @@ describe("Home V2 session index", () => {
       time: { created: 1, updated: 20, archived: null },
     } as unknown as SessionV2Info
     const result = parseHomeSessionIndex([
-      session({ id: "root", updated: 30, status: "awaiting_run" }),
+      session({
+        id: "root",
+        updated: 30,
+        status: "awaiting_run",
+        provenance: {
+          type: "issue",
+          integrationID: "linear",
+          externalKey: "ENG-42",
+          externalUrl: "https://linear.app/issue/ENG-42",
+          watcherName: "Engineering",
+        },
+      }),
       activeNull,
       session({ id: "child", parentID: "root", updated: 40 }),
       session({ id: "archived", archived: 50, updated: 50 }),
@@ -95,6 +109,7 @@ describe("Home V2 session index", () => {
         projectID: "project",
         title: "root",
         status: "awaiting_run",
+        provenance: expect.objectContaining({ externalKey: "ENG-42" }),
         time: { created: 1, updated: 30 },
       }),
       expect.objectContaining({
@@ -155,5 +170,6 @@ describe("Home V2 session index", () => {
     expect(homeSessionIndexRefresh("session.next.moved", true).refetch).toBe(true)
     expect(homeSessionIndexRefresh("session.next.prompt.admitted", true).refetch).toBe(true)
     expect(homeSessionIndexRefresh("session.execution.started", true).refetch).toBe(true)
+    expect(homeSessionIndexRefresh("issue_watcher.session.materialized", true).refetch).toBe(true)
   })
 })

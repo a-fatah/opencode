@@ -1,6 +1,8 @@
 import { IssueWatcher } from "@opencode-ai/schema/issue-watcher"
 import { IssueMatch } from "@opencode-ai/schema/issue-match"
 import { Integration } from "@opencode-ai/schema/integration"
+import { SessionProvenance } from "@opencode-ai/schema/session-provenance"
+import { SessionID } from "@opencode-ai/schema/session-id"
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
 import {
@@ -15,6 +17,33 @@ import {
   IssueWatcherRunConflict,
   InvalidCursorError,
 } from "../errors"
+
+export class IssueMatchNotFoundError extends Schema.TaggedErrorClass<IssueMatchNotFoundError>()(
+  "IssueMatchNotFoundError",
+  { matchID: Schema.String, message: Schema.String },
+  { httpApiStatus: 404 },
+) {}
+
+export class IssueMatchConflictError extends Schema.TaggedErrorClass<IssueMatchConflictError>()(
+  "IssueMatchConflictError",
+  { matchID: Schema.String, message: Schema.String },
+  { httpApiStatus: 409 },
+) {}
+
+export class IssueWatcherProjectNotFoundError extends Schema.TaggedErrorClass<IssueWatcherProjectNotFoundError>()(
+  "IssueWatcherProjectNotFoundError",
+  { projectID: Schema.String, message: Schema.String },
+  { httpApiStatus: 404 },
+) {}
+
+export class IssueWatcherSessionNotFoundError extends Schema.TaggedErrorClass<IssueWatcherSessionNotFoundError>()(
+  "IssueWatcherSessionNotFoundError",
+  { sessionID: Schema.String, message: Schema.String },
+  { httpApiStatus: 404 },
+) {}
+
+const MatchErrors = [IssueMatchNotFoundError, IssueMatchConflictError] as const
+const MaterializationErrors = [...MatchErrors, IssueWatcherProjectNotFoundError] as const
 
 const SourceErrors = [
   InvalidRequestError,
@@ -66,6 +95,14 @@ export const IssueWatcherGroup = HttpApiGroup.make("server.issueWatcher")
       success: IssueWatcher.IntegrationSummary,
       error: [...SourceErrors, IssueIntegrationTenantConflict],
     }).annotateMerge(OpenApi.annotations({ identifier: "v2.issueWatcher.integration.rotate", summary: "Rotate issue source credentials" })),
+  )
+  .add(
+    HttpApiEndpoint.post("issueWatcher.metadata", "/api/issue-watcher/integrations/:integrationID/connection/:connectionID/metadata", {
+      params: { integrationID: Integration.ID, connectionID: IssueWatcher.ConnectionID },
+      payload: IssueWatcher.MetadataInput,
+      success: IssueWatcher.Metadata,
+      error: SourceErrors,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.issueWatcher.integration.metadata", summary: "List issue source metadata" })),
   )
   .add(
     HttpApiEndpoint.post("issueWatcher.preview", "/api/issue-watcher/preview", {
@@ -197,6 +234,94 @@ export const IssueWatcherGroup = HttpApiGroup.make("server.issueWatcher")
     HttpApiEndpoint.get("issueWatcher.inboxSummary", "/api/issue-watcher/inbox/summary", {
       success: IssueWatcher.InboxSummary,
     }).annotateMerge(OpenApi.annotations({ identifier: "v2.issueWatcher.inbox.summary", summary: "Get issue watcher inbox summary" })),
+  )
+  .add(
+    HttpApiEndpoint.post("issueWatcher.bulk", "/api/issue-watcher/inbox/bulk", {
+      payload: IssueWatcher.BulkInput,
+      success: IssueWatcher.BulkResult,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.issueWatcher.inbox.bulk", summary: "Apply a bulk inbox action" })),
+  )
+  .add(
+    HttpApiEndpoint.post("issueWatcher.approve", "/api/issue-watcher/inbox/:matchID/approve", {
+      params: { matchID: IssueMatch.ID },
+      payload: IssueWatcher.MaterializeInput,
+      success: IssueWatcher.MaterializeResult,
+      error: MaterializationErrors,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.issueWatcher.inbox.approve", summary: "Approve an inbox match" })),
+  )
+  .add(
+    HttpApiEndpoint.post("issueWatcher.routeMatch", "/api/issue-watcher/inbox/:matchID/route", {
+      params: { matchID: IssueMatch.ID },
+      payload: IssueWatcher.RouteInput,
+      success: HttpApiSchema.NoContent,
+      error: MaterializationErrors,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.issueWatcher.inbox.route", summary: "Route an inbox match" })),
+  )
+  .add(
+    HttpApiEndpoint.post("issueWatcher.skip", "/api/issue-watcher/inbox/:matchID/skip", {
+      params: { matchID: IssueMatch.ID },
+      success: HttpApiSchema.NoContent,
+      error: MatchErrors,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.issueWatcher.inbox.skip", summary: "Skip an inbox match" })),
+  )
+  .add(
+    HttpApiEndpoint.post("issueWatcher.dismiss", "/api/issue-watcher/inbox/:matchID/dismiss", {
+      params: { matchID: IssueMatch.ID },
+      success: HttpApiSchema.NoContent,
+      error: MatchErrors,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.issueWatcher.inbox.dismiss", summary: "Dismiss an inbox match" })),
+  )
+  .add(
+    HttpApiEndpoint.post("issueWatcher.rematerialize", "/api/issue-watcher/inbox/:matchID/rematerialize", {
+      params: { matchID: IssueMatch.ID },
+      payload: IssueWatcher.MaterializeInput,
+      success: IssueWatcher.MaterializeResult,
+      error: MaterializationErrors,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.issueWatcher.inbox.rematerialize", summary: "Rematerialize an inbox match" })),
+  )
+  .add(
+    HttpApiEndpoint.get("issueWatcher.duplicateDetail", "/api/issue-watcher/inbox/:matchID/duplicate", {
+      params: { matchID: IssueMatch.ID },
+      success: IssueWatcher.DuplicateDetail,
+      error: MatchErrors,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.issueWatcher.inbox.duplicate.get", summary: "Get duplicate match detail" })),
+  )
+  .add(
+    HttpApiEndpoint.post("issueWatcher.resolveDuplicate", "/api/issue-watcher/inbox/:matchID/duplicate", {
+      params: { matchID: IssueMatch.ID },
+      payload: IssueWatcher.DuplicateResolutionInput,
+      success: IssueWatcher.DuplicateResolutionResult,
+      error: MaterializationErrors,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.issueWatcher.inbox.duplicate.resolve", summary: "Resolve a duplicate match" })),
+  )
+  .add(
+    HttpApiEndpoint.post("issueWatcher.addIgnore", "/api/issue-watcher/watchers/:watcherID/ignore", {
+      params: { watcherID: IssueWatcher.ID },
+      payload: IssueWatcher.IgnoreInput,
+      success: IssueWatcher.Ignore,
+      error: IssueWatcherNotFoundError,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.issueWatcher.ignore.add", summary: "Ignore an issue" })),
+  )
+  .add(
+    HttpApiEndpoint.delete("issueWatcher.removeIgnore", "/api/issue-watcher/watchers/:watcherID/ignore/:externalID", {
+      params: { watcherID: IssueWatcher.ID, externalID: Schema.String },
+      success: HttpApiSchema.NoContent,
+      error: IssueWatcherNotFoundError,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.issueWatcher.ignore.remove", summary: "Remove an ignored issue" })),
+  )
+  .add(
+    HttpApiEndpoint.get("issueWatcher.provenanceDetail", "/api/issue-watcher/sessions/:sessionID", {
+      params: { sessionID: SessionID },
+      success: SessionProvenance.Detail,
+      error: IssueWatcherSessionNotFoundError,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.issueWatcher.session.get", summary: "Get session issue provenance" })),
+  )
+  .add(
+    HttpApiEndpoint.post("issueWatcher.syncProvenance", "/api/issue-watcher/sessions/:sessionID/sync", {
+      params: { sessionID: SessionID },
+      success: SessionProvenance.Detail,
+      error: [IssueWatcherSessionNotFoundError, ...SourceErrors],
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.issueWatcher.session.sync", summary: "Sync session issue provenance" })),
   )
   .add(
     HttpApiEndpoint.post("issueWatcher.enable", "/api/issue-watcher/watchers/:watcherID/enable", {

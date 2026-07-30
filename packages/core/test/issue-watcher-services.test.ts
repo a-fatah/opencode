@@ -32,6 +32,7 @@ describe("IssueProvider", () => {
         method: { type: "key" },
         tenantIdentity: () => Effect.succeed("github.com"),
         verify: () => Effect.succeed({ ok: true, detail: "connected" }),
+        metadata: () => Effect.succeed({ projects: [], users: [], labels: [], statuses: [], components: [], issueTypes: [], fields: [] }),
         search: () => Effect.succeed({ issues: [], cursor: "cursor" }),
         get: () => Effect.die("unused"),
         comment: () => new IssueProvider.NotImplementedError({ operation: "comment" }),

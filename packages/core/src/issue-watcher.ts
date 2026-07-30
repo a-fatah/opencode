@@ -1,9 +1,9 @@
 export * as IssueWatcher from "./issue-watcher"
 
-import { and, asc, desc, eq, isNotNull, isNull, lt, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, exists, isNotNull, isNull, lt, notExists, or, sql } from "drizzle-orm"
 import { IssueWatcher } from "@opencode-ai/schema/issue-watcher"
 import { IssueMatch } from "@opencode-ai/schema/issue-match"
-import { Context, Deferred, Effect, Layer, Ref, Result, Schema } from "effect"
+import { Cause, Context, DateTime, Deferred, Effect, Exit, Layer, Option, Ref, Result, Schema } from "effect"
 import { Database } from "./database/database"
 import { makeGlobalNode } from "./effect/app-node"
 import { EventV2 } from "./event"
@@ -15,6 +15,7 @@ import {
   IssueMatchTable,
   IssueMaterializationTable,
   IssueMatchSessionTable,
+  IssueSessionClaimTable,
   IssueWatcherIgnoreTable,
   IssueWatcherRunTable,
   IssueWatcherTable,
@@ -26,6 +27,14 @@ import { Repository } from "./repository"
 import { ProjectRoutingCatalog } from "./project/routing-catalog"
 import { WorkspaceProvisioner } from "./workspace-provisioner"
 import { Hash } from "./util/hash"
+import { SessionV2 } from "./session"
+import { IssueWatcherMaterialization } from "./issue-watcher/materialization"
+import { renderPrompt } from "./issue-watcher/prompt"
+import { SessionID } from "@opencode-ai/schema/session-id"
+import { SessionMessage } from "./session/message"
+import { SessionProvenance } from "@opencode-ai/schema/session-provenance"
+import { Project } from "@opencode-ai/schema/project"
+import { IssueWritebackOperationTable, SessionProvenanceTable } from "./issue-watcher/sql"
 
 export const ID = IssueWatcher.ID
 export type ID = IssueWatcher.ID
@@ -68,30 +77,7 @@ export function route(
   return { unrouted: true, reason: "No repository or explicit mapping matched", ...(suggestion ? { suggestion } : {}) }
 }
 
-export function renderPrompt(
-  issue: Issue.Info,
-  project: IssueWatcher.ProjectRoutingSnapshot | undefined,
-  template: string,
-) {
-  const values = {
-    "issue.id": issue.id,
-    "issue.key": issue.key,
-    "issue.title": issue.title,
-    "issue.description": issue.description,
-    "issue.url": issue.url,
-    "issue.status": issue.status,
-    "issue.assignee": issue.assignee?.name ?? "",
-    "issue.labels": issue.labels.join(", "),
-    "issue.issueProject": issue.issueProject,
-    "issue.component": issue.component ?? "",
-    "issue.acceptanceCriteria": issue.acceptanceCriteria ?? "",
-    "issue.repoField": issue.repoField ?? "",
-    "project.id": project?.projectID ?? "",
-    "project.name": project?.name ?? "",
-    "project.directory": project?.directories[0] ?? "",
-  }
-  return template.replace(/\{\{\s*([a-zA-Z.]+)\s*\}\}/g, (token, key: keyof typeof values) => values[key] ?? token)
-}
+export { renderPrompt }
 
 export function renderWriteback(issue: Issue.Info, action: IssueWatcher.Action): IssueWatcher.WritebackPlan {
   return {
@@ -109,6 +95,19 @@ function canonicalJson(value: Schema.Json): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`
   return `{${Object.entries(value).toSorted(([left], [right]) => left.localeCompare(right)).map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`
+}
+
+function bulkError(cause: Cause.Cause<unknown>): IssueWatcher.BulkError {
+  const error = Option.getOrUndefined(Cause.findErrorOption(cause))
+  if (error instanceof MatchNotFoundError) return { code: "not_found", message: `Issue match not found: ${error.id}` }
+  if (error instanceof ProjectNotFoundError) return { code: "unrouted", message: `Project not found: ${error.id}` }
+  if (error instanceof MatchConflictError) {
+    const code = error.detail.includes("not routed") ? "unrouted"
+      : error.detail.includes("duplicate") ? "duplicate"
+      : "invalid_state"
+    return { code, message: error.detail }
+  }
+  return { code: "materialization_failed", message: Cause.pretty(cause) }
 }
 
 export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("IssueWatcher.NotFoundError", {
@@ -151,6 +150,24 @@ export class InvalidCursorError extends Schema.TaggedErrorClass<InvalidCursorErr
   detail: Schema.String,
 }) {}
 
+export class MatchNotFoundError extends Schema.TaggedErrorClass<MatchNotFoundError>()("IssueWatcher.MatchNotFoundError", {
+  id: IssueMatch.ID,
+}) {}
+
+export class MatchConflictError extends Schema.TaggedErrorClass<MatchConflictError>()("IssueWatcher.MatchConflictError", {
+  id: IssueMatch.ID,
+  detail: Schema.String,
+}) {}
+
+export class ProjectNotFoundError extends Schema.TaggedErrorClass<ProjectNotFoundError>()("IssueWatcher.ProjectNotFoundError", {
+  id: Project.ID,
+}) {}
+
+export class ProvenanceNotFoundError extends Schema.TaggedErrorClass<ProvenanceNotFoundError>()(
+  "IssueWatcher.ProvenanceNotFoundError",
+  { sessionID: SessionID },
+) {}
+
 export type Error = NotFoundError | ArchivedError | OwnerConflictError
 
 export interface Interface {
@@ -182,6 +199,11 @@ export interface Interface {
       IssueWatcher.IntegrationSummary,
       SourceNotFoundError | ConnectionNotFoundError | TenantConflictError | IssueProvider.Error
     >
+    readonly metadata: (
+      integrationID: Integration.ID,
+      connectionID: Credential.ConnectionID,
+      input: IssueWatcher.MetadataInput,
+    ) => Effect.Effect<IssueWatcher.Metadata, SourceNotFoundError | ConnectionNotFoundError | IssueProvider.Error>
   }
   readonly summary: () => Effect.Effect<IssueWatcher.InboxSummary>
   readonly run: (id: ID) => Effect.Effect<IssueWatcher.Run, NotFoundError | OwnerConflictError | RunConflictError>
@@ -205,6 +227,19 @@ export interface Interface {
   readonly preview: (
     input: IssueWatcher.PreviewInput,
   ) => Effect.Effect<IssueWatcher.Preview, SourceNotFoundError | ConnectionNotFoundError | IssueProvider.Error>
+  readonly matches: IssueWatcherMaterialization.Interface
+  readonly approve: (id: IssueMatch.ID, input: IssueWatcher.MaterializeInput) => Effect.Effect<IssueWatcher.MaterializeResult, MatchNotFoundError | MatchConflictError | ProjectNotFoundError>
+  readonly routeMatch: (id: IssueMatch.ID, input: IssueWatcher.RouteInput) => Effect.Effect<void, MatchNotFoundError | MatchConflictError | ProjectNotFoundError>
+  readonly skip: (id: IssueMatch.ID) => Effect.Effect<void, MatchNotFoundError | MatchConflictError>
+  readonly dismiss: (id: IssueMatch.ID) => Effect.Effect<void, MatchNotFoundError | MatchConflictError>
+  readonly rematerialize: (id: IssueMatch.ID, input: IssueWatcher.MaterializeInput) => Effect.Effect<IssueWatcher.MaterializeResult, MatchNotFoundError | MatchConflictError | ProjectNotFoundError>
+  readonly duplicateDetail: (id: IssueMatch.ID) => Effect.Effect<IssueWatcher.DuplicateDetail, MatchNotFoundError | MatchConflictError>
+  readonly resolveDuplicate: (id: IssueMatch.ID, input: IssueWatcher.DuplicateResolutionInput) => Effect.Effect<IssueWatcher.DuplicateResolutionResult, MatchNotFoundError | MatchConflictError | ProjectNotFoundError>
+  readonly bulk: (input: IssueWatcher.BulkInput) => Effect.Effect<IssueWatcher.BulkResult>
+  readonly addIgnore: (id: ID, input: IssueWatcher.IgnoreInput) => Effect.Effect<IssueWatcher.Ignore, NotFoundError>
+  readonly removeIgnore: (id: ID, externalID: string) => Effect.Effect<void, NotFoundError>
+  readonly provenanceDetail: (sessionID: SessionID) => Effect.Effect<SessionProvenance.Detail, ProvenanceNotFoundError>
+  readonly syncProvenance: (sessionID: SessionID) => Effect.Effect<SessionProvenance.Detail, ProvenanceNotFoundError | SourceNotFoundError | ConnectionNotFoundError | IssueProvider.Error>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/IssueWatcher") {}
@@ -219,12 +254,28 @@ const layer = Layer.effect(
     const credentials = yield* Credential.Service
     const config = yield* GlobalConfig.Service
     const projectCatalog = yield* ProjectRoutingCatalog.Service
+    const workspaces = yield* WorkspaceProvisioner.Service
+    const sessions = yield* SessionV2.Service
     const decode = Schema.decodeUnknownSync(Info)
     const decodeRun = Schema.decodeUnknownSync(IssueWatcher.Run)
     const decodeMatch = Schema.decodeUnknownSync(IssueMatch.Info)
     const decodeObservation = Schema.decodeUnknownSync(IssueMatch.Observation)
     const decodeIgnore = Schema.decodeUnknownSync(IssueWatcher.Ignore)
+    const decodeLink = Schema.decodeUnknownSync(IssueMatch.SessionLink)
+    const decodeMaterialization = Schema.decodeUnknownSync(IssueMatch.Materialization)
+    const decodeWriteback = Schema.decodeUnknownSync(IssueMatch.WritebackOperation)
     const active = new Map<ID, Deferred.Deferred<IssueWatcher.Run, NotFoundError | RunConflictError>>()
+    const materialization = yield* IssueWatcherMaterialization.make({
+      db,
+      events,
+      projects: projectCatalog,
+      workspaces,
+      sessions,
+      settings: () => config.getIssueWatcher().pipe(Effect.map((settings) => ({
+        concurrentRuns: settings.concurrentRuns ?? 3,
+        retryFailedRuns: settings.retryFailedRuns ?? "once",
+      }))),
+    })
 
     const stored = (row: typeof IssueWatcherTable.$inferSelect) => decode({
       id: row.id,
@@ -314,6 +365,139 @@ const layer = Layer.effect(
       ...(row.reason ? { reason: row.reason } : {}),
       timeCreated: row.time_created,
       timeUpdated: row.time_updated,
+    })
+
+    const requireMatch = Effect.fnUntraced(function* (id: IssueMatch.ID) {
+      const row = yield* db.select().from(IssueMatchTable).where(eq(IssueMatchTable.id, id)).get().pipe(Effect.orDie)
+      if (!row) return yield* new MatchNotFoundError({ id })
+      return row
+    })
+
+    const materializeResult = Effect.fnUntraced(function* (id: IssueMatch.ID, request: IssueWatcher.MaterializeInput, rematerialize = false) {
+      const match = yield* requireMatch(id)
+      if (match.state === "unrouted" && !request.projectID)
+        return yield* new MatchConflictError({ id, detail: "Issue match is not routed" })
+      if (match.state === "skipped" || match.state === "dismissed")
+        return yield* new MatchConflictError({ id, detail: `Issue match is ${match.state}` })
+      if (match.state === "duplicate")
+        return yield* new MatchConflictError({ id, detail: "Issue match is duplicate" })
+      const projectID = request.projectID ?? (match.project_id ? Project.ID.make(match.project_id) : undefined)
+      if (!projectID) return yield* new MatchConflictError({ id, detail: "Issue match is not routed" })
+      if (rematerialize) {
+        const previous = yield* db.select().from(IssueMaterializationTable)
+          .where(eq(IssueMaterializationTable.match_id, id))
+          .orderBy(desc(IssueMaterializationTable.time_created)).get().pipe(Effect.orDie)
+        if (
+          !previous || !["cancelled", "failed"].includes(previous.state) || previous.provider_started ||
+          (previous.state === "failed" && !previous.error?.startsWith("retryable:"))
+        ) return yield* new MatchConflictError({ id, detail: "Issue materialization is not retryable" })
+      }
+      const project = yield* projectCatalog.resolve(projectID).pipe(
+        Effect.mapError(() => new ProjectNotFoundError({ id: projectID })),
+      )
+      const value = yield* materialization.materialize({
+        matchID: id,
+        mode: request.mode,
+        projectID: project.id,
+        ...(request.workspace ? { workspace: request.workspace } : {}),
+        rematerialize,
+      })
+      if (!value) return IssueWatcher.MaterializeResult.make({ status: "queued", reason: "concurrency_limit" })
+      if ("_tag" in value)
+        return yield* new MatchConflictError({ id, detail: "Issue match is duplicate" })
+      if (value.state === "failed") return yield* new MatchConflictError({
+        id,
+        detail: value.error ?? "Issue materialization failed",
+      })
+      return IssueWatcher.MaterializeResult.make({
+        status: "created",
+        materializationID: value.id,
+        sessionID: value.sessionID,
+      })
+    })
+
+    const provenanceDetail = Effect.fn("IssueWatcher.provenanceDetail")(function* (sessionID: SessionID) {
+      const provenance = yield* db.select().from(SessionProvenanceTable)
+        .where(eq(SessionProvenanceTable.session_id, sessionID)).get().pipe(Effect.orDie)
+      if (!provenance) return yield* new ProvenanceNotFoundError({ sessionID })
+      const match = provenance.match_id
+        ? yield* db.select().from(IssueMatchTable).where(eq(IssueMatchTable.id, provenance.match_id)).get().pipe(Effect.orDie)
+        : undefined
+      if (!match) return yield* new ProvenanceNotFoundError({ sessionID })
+      const integrationID = Integration.ID.make(provenance.integration_id)
+      const connectionID = Credential.ConnectionID.make(provenance.connection_id)
+      const adapter = yield* providers.get(integrationID)
+      const links = yield* db.select().from(IssueMatchSessionTable)
+        .where(eq(IssueMatchSessionTable.match_id, match.id)).all().pipe(Effect.orDie)
+      const materialized = yield* db.select().from(IssueMaterializationTable)
+        .where(eq(IssueMaterializationTable.match_id, match.id)).orderBy(desc(IssueMaterializationTable.time_created)).get().pipe(Effect.orDie)
+      const writebacks = yield* db.select().from(IssueWritebackOperationTable)
+        .where(eq(IssueWritebackOperationTable.session_id, sessionID)).all().pipe(Effect.orDie)
+      return SessionProvenance.Detail.make({
+        provenance: {
+          sessionID,
+          kind: "issue",
+          ...(provenance.watcher_id ? { watcherID: provenance.watcher_id } : {}),
+          ...(provenance.match_id ? { matchID: provenance.match_id } : {}),
+          integrationID,
+          connectionID,
+          externalKey: provenance.external_key,
+          externalUrl: provenance.external_url,
+          watcherName: provenance.watcher_name,
+          ...(provenance.branch ? { branch: provenance.branch } : {}),
+          ...(provenance.last_synced_at ? { lastSyncedAt: DateTime.makeUnsafe(provenance.last_synced_at) } : {}),
+          timeCreated: DateTime.makeUnsafe(provenance.time_created),
+          timeUpdated: DateTime.makeUnsafe(provenance.time_updated),
+        },
+        issue: match.payload,
+        source: { integrationID, name: adapter?.name ?? integrationID, glyph: integrationID },
+        watcher: { ...(provenance.watcher_id ? { id: provenance.watcher_id } : {}), name: provenance.watcher_name },
+        ...(provenance.branch ? { branch: provenance.branch } : {}),
+        ...(materialized?.resolved_location ? { workspace: materialized.resolved_location } : {}),
+        sessions: links.map((row) => decodeLink({
+          id: row.id,
+          matchID: row.match_id,
+          sessionID: row.session_id,
+          isPrimary: row.is_primary,
+          reason: row.reason,
+          ...(row.deleted_at ? { deletedAt: row.deleted_at } : {}),
+          timeCreated: row.time_created,
+          timeUpdated: row.time_updated,
+        })),
+        ...(materialized ? { materialization: decodeMaterialization({
+          id: materialized.id,
+          matchID: materialized.match_id,
+          mode: materialized.mode,
+          projectID: materialized.project_id,
+          workspace: materialized.workspace,
+          ...(materialized.resolved_location ? { resolvedLocation: materialized.resolved_location } : {}),
+          ...(materialized.workspace_lease ? { workspaceLease: materialized.workspace_lease } : {}),
+          baselineObservationID: materialized.baseline_observation_id,
+          state: materialized.state,
+          sessionID: materialized.session_id,
+          messageID: materialized.message_id,
+          ...(materialized.execution_attempt_id ? { executionAttemptID: materialized.execution_attempt_id } : {}),
+          providerStarted: materialized.provider_started,
+          attempts: materialized.attempts,
+          ...(materialized.error ? { error: materialized.error } : {}),
+          timeCreated: materialized.time_created,
+          timeUpdated: materialized.time_updated,
+        }) } : {}),
+        writebacks: writebacks.map((row) => decodeWriteback({
+          id: row.id,
+          sessionID: row.session_id,
+          kind: row.kind,
+          triggerID: row.trigger_id,
+          request: row.request,
+          state: row.state,
+          ...(row.provider_result_id ? { providerResultID: row.provider_result_id } : {}),
+          attempts: row.attempts,
+          ...(row.error ? { error: row.error } : {}),
+          timeCreated: row.time_created,
+          timeUpdated: row.time_updated,
+        })),
+        ...(provenance.last_synced_at ? { lastSyncedAt: DateTime.makeUnsafe(provenance.last_synced_at) } : {}),
+      })
     })
 
     const publish = (watcher: Info) => events.publish(Event.Updated, { watcher }).pipe(Effect.asVoid)
@@ -429,7 +613,9 @@ const layer = Layer.effect(
     })
 
     const inboxSummary = Effect.fn("IssueWatcher.summary")(function* () {
-      const matches = yield* db.select({ state: IssueMatchTable.state }).from(IssueMatchTable).all().pipe(Effect.orDie)
+      const matches = yield* db.select({ id: IssueMatchTable.id, state: IssueMatchTable.state }).from(IssueMatchTable).all().pipe(Effect.orDie)
+      const materialized = new Set((yield* db.select({ matchID: IssueMaterializationTable.match_id })
+        .from(IssueMaterializationTable).all().pipe(Effect.orDie)).map((item) => item.matchID))
       const failedMaterializations = yield* db
         .select({ count: sql<number>`count(*)` })
         .from(IssueMaterializationTable)
@@ -449,7 +635,7 @@ const layer = Layer.effect(
         .get()
         .pipe(Effect.orDie)
       return Schema.decodeUnknownSync(IssueWatcher.InboxSummary)({
-        pending: matches.filter((item) => item.state === "pending").length,
+        pending: matches.filter((item) => item.state === "pending" && !materialized.has(item.id)).length,
         unrouted: matches.filter((item) => item.state === "unrouted").length,
         duplicate: matches.filter((item) => item.state === "duplicate").length,
         failedMaterializations: failedMaterializations?.count ?? 0,
@@ -653,15 +839,37 @@ const layer = Layer.effect(
           detail: "Issue watcher changed while polling; the result was discarded",
         })
       }
-      const row = yield* db.select().from(IssueWatcherRunTable).where(eq(IssueWatcherRunTable.id, runID)).get().pipe(Effect.orDie)
-      if (!row) return yield* Effect.die("Completed issue watcher run was not found")
-      const run = storedRun(row)
       const changedRows = yield* db.select().from(IssueMatchTable).where(eq(IssueMatchTable.watcher_id, watcher.id)).all().pipe(Effect.orDie)
       yield* Effect.forEach(changes.filter((change) => !change.current || change.updatesMatch), (change) => {
         const match = changedRows.find((row) => row.external_id === change.issue.id)
         if (!match) return Effect.void
         return events.publish(change.current ? Event.MatchUpdated : Event.MatchCreated, { match: storedMatch(match) })
       }, { discard: true })
+      const automatic = watcher.action.mode === "inbox"
+        ? []
+        : yield* Effect.forEach(
+            changes.filter((change) => !change.current && change.state === "pending"),
+            (change) => {
+              const match = changedRows.find((row) => row.external_id === change.issue.id)
+              return match
+                ? materialization.materialize({
+                    matchID: match.id,
+                    mode: watcher.action.mode === "run" ? "run" : "awaiting_run",
+                  }).pipe(Effect.map((value) => [value]))
+                : Effect.succeed([])
+            },
+            { concurrency: "unbounded" },
+          ).pipe(Effect.map((items) => items.flat()))
+      if (automatic.length) {
+        yield* db.update(IssueWatcherRunTable).set({
+          created: automatic.filter((item) => item && !("_tag" in item) && item.state !== "failed").length,
+          queued: automatic.filter((item) => !item || (!("_tag" in item) && item.mode === "awaiting_run" && item.state !== "failed")).length,
+          failed: automatic.filter((item) => item && !("_tag" in item) && item.state === "failed").length,
+        }).where(eq(IssueWatcherRunTable.id, runID)).run().pipe(Effect.orDie)
+      }
+      const row = yield* db.select().from(IssueWatcherRunTable).where(eq(IssueWatcherRunTable.id, runID)).get().pipe(Effect.orDie)
+      if (!row) return yield* Effect.die("Completed issue watcher run was not found")
+      const run = storedRun(row)
       yield* events.publish(Event.RunCompleted, { run })
       yield* publish(yield* get(watcher.id))
       yield* events.publish(Event.InboxChanged, yield* inboxSummary())
@@ -680,6 +888,23 @@ const layer = Layer.effect(
           Deferred.doneUnsafe(deferred, exit)
         })),
       )
+    })
+
+    const reconcileAutomatic = Effect.fn("IssueWatcher.reconcileAutomatic")(function* () {
+      const rows = yield* db.select({ match: IssueMatchTable, watcher: IssueWatcherTable })
+        .from(IssueMatchTable)
+        .innerJoin(IssueWatcherTable, eq(IssueWatcherTable.id, IssueMatchTable.watcher_id))
+        .where(and(
+          eq(IssueMatchTable.state, "pending"),
+          isNull(IssueWatcherTable.archived_at),
+          sql`${IssueWatcherTable.action} ->> '$.mode' <> 'inbox'`,
+          notExists(db.select({ id: IssueMaterializationTable.id }).from(IssueMaterializationTable)
+            .where(eq(IssueMaterializationTable.match_id, IssueMatchTable.id))),
+        )).all().pipe(Effect.orDie)
+      yield* Effect.forEach(rows, (row) => materialization.materialize({
+        matchID: row.match.id,
+        mode: row.watcher.action.mode === "run" ? "run" : "awaiting_run",
+      }), { concurrency: 1, discard: true })
     })
 
     const listWatchers = Effect.fnUntraced(function* () {
@@ -887,6 +1112,10 @@ const layer = Layer.effect(
             .pipe(Effect.mapError(() => new ConnectionNotFoundError({ connectionID })))
           return yield* projectSource(adapter)
         }),
+        metadata: Effect.fn("IssueWatcher.source.metadata")(function* (integrationID, connectionID, input) {
+          const adapter = yield* provider(integrationID)
+          return yield* adapter.metadata(yield* ownedConnection(integrationID, connectionID), input)
+        }),
       },
       summary: inboxSummary,
       run,
@@ -947,6 +1176,16 @@ const layer = Layer.effect(
           .where(and(
             input.state ? eq(IssueMatchTable.state, input.state) : undefined,
             input.integrationID ? eq(IssueMatchTable.integration_id, input.integrationID) : undefined,
+            or(
+              sql`${IssueMatchTable.state} <> 'pending'`,
+              notExists(db.select({ id: IssueMaterializationTable.id }).from(IssueMaterializationTable)
+                .where(eq(IssueMaterializationTable.match_id, IssueMatchTable.id))),
+              exists(db.select({ id: IssueMaterializationTable.id }).from(IssueMaterializationTable).where(and(
+                eq(IssueMaterializationTable.match_id, IssueMatchTable.id),
+                eq(IssueMaterializationTable.state, "failed"),
+                eq(IssueMaterializationTable.provider_started, false),
+              ))),
+            ),
             input.filter === "attention"
               ? or(
                   eq(IssueMatchTable.state, "unrouted"),
@@ -964,9 +1203,12 @@ const layer = Layer.effect(
         const page = rows.slice(0, limit)
         const last = page.at(-1)?.match
         return {
-          items: page.map((row) => {
+          items: yield* Effect.forEach(page, (row) => Effect.gen(function* () {
             const project = projects.find((item) => item.projectID === row.match.project_id)
             const suggestion = !project && projects.length === 1 ? projects[0] : undefined
+            const latest = yield* db.select().from(IssueMaterializationTable)
+              .where(eq(IssueMaterializationTable.match_id, row.match.id))
+              .orderBy(desc(IssueMaterializationTable.time_created), desc(IssueMaterializationTable.id)).get().pipe(Effect.orDie)
             return {
               match: storedMatch(row.match),
               sourceName: adapters.find((adapter) => adapter.integrationID === row.match.integration_id)?.name ?? row.match.integration_id,
@@ -974,8 +1216,27 @@ const layer = Layer.effect(
               watcherName: row.watcher.name,
               ...(project ? { project: { id: project.projectID, name: project.name } } : {}),
               ...(suggestion ? { suggestion: { id: suggestion.projectID, name: suggestion.name } } : {}),
+              ...(latest ? { materialization: decodeMaterialization({
+                id: latest.id,
+                matchID: latest.match_id,
+                mode: latest.mode,
+                projectID: latest.project_id,
+                workspace: latest.workspace,
+                ...(latest.resolved_location ? { resolvedLocation: latest.resolved_location } : {}),
+                ...(latest.workspace_lease ? { workspaceLease: latest.workspace_lease } : {}),
+                baselineObservationID: latest.baseline_observation_id,
+                state: latest.state,
+                sessionID: latest.session_id,
+                messageID: latest.message_id,
+                ...(latest.execution_attempt_id ? { executionAttemptID: latest.execution_attempt_id } : {}),
+                providerStarted: latest.provider_started,
+                attempts: latest.attempts,
+                ...(latest.error ? { error: latest.error } : {}),
+                timeCreated: latest.time_created,
+                timeUpdated: latest.time_updated,
+              }) } : {}),
             }
-          }),
+          })),
           ...(rows.length > limit && last ? { nextCursor: encodeCursor(last.time_created, last.id) } : {}),
         }
       }),
@@ -1011,14 +1272,215 @@ const layer = Layer.effect(
           truncated: issues.length > PreviewLimit,
         }
       }),
+      matches: materialization,
+      approve: (id, input) => materializeResult(id, input),
+      routeMatch: Effect.fn("IssueWatcher.routeMatch")(function* (id, input) {
+        const match = yield* requireMatch(id)
+        yield* projectCatalog.resolve(input.projectID).pipe(
+          Effect.mapError(() => new ProjectNotFoundError({ id: input.projectID })),
+        )
+        if (!input.persistMapping) {
+          yield* materialization.route(id, input.projectID)
+          return
+        }
+        const watcher = yield* get(match.watcher_id).pipe(
+          Effect.mapError(() => new MatchConflictError({ id, detail: "Issue watcher no longer exists" })),
+        )
+        const key = match.payload.component
+          ? { type: "component" as const, value: match.payload.component }
+          : match.payload.issueProject
+            ? { type: "issueProject" as const, value: match.payload.issueProject }
+            : match.payload.labels[0]
+              ? { type: "label" as const, value: match.payload.labels[0] }
+              : undefined
+        if (!key) return yield* new MatchConflictError({ id, detail: "Issue match has no routable mapping value" })
+        const mappings = watcher.routing.mappings.some((item) => item.key.type === key.type && item.key.value === key.value)
+          ? watcher.routing.mappings.map((item) => item.key.type === key.type && item.key.value === key.value
+              ? { ...item, projectID: input.projectID }
+              : item)
+          : [...watcher.routing.mappings, { key, projectID: input.projectID }]
+        yield* db.transaction((tx) => Effect.gen(function* () {
+          yield* tx.update(IssueMatchTable).set({ state: "pending", project_id: input.projectID, route_reason: "Manually routed" })
+            .where(eq(IssueMatchTable.id, id)).run()
+          yield* tx.update(IssueWatcherTable).set({ routing: { ...watcher.routing, mappings } })
+            .where(eq(IssueWatcherTable.id, watcher.id)).run()
+        })).pipe(Effect.orDie)
+        yield* get(watcher.id).pipe(Effect.flatMap(publish), Effect.orDie)
+      }),
+      skip: Effect.fn("IssueWatcher.skip")(function* (id) {
+        const match = yield* requireMatch(id)
+        if (match.state === "dismissed") return yield* new MatchConflictError({ id, detail: "Issue match is dismissed" })
+        yield* materialization.skip(id)
+      }),
+      dismiss: Effect.fn("IssueWatcher.dismiss")(function* (id) {
+        yield* requireMatch(id)
+        yield* materialization.dismiss(id)
+      }),
+      rematerialize: (id, input) => materializeResult(id, input, true),
+      duplicateDetail: Effect.fn("IssueWatcher.duplicateDetail")(function* (id) {
+        const match = yield* requireMatch(id)
+        if (match.state !== "duplicate") return yield* new MatchConflictError({ id, detail: "Issue match is not a duplicate" })
+        const current = yield* db.select().from(IssueMatchObservationTable)
+          .where(eq(IssueMatchObservationTable.match_id, id))
+          .orderBy(desc(IssueMatchObservationTable.time_created), desc(IssueMatchObservationTable.id)).get().pipe(Effect.orDie)
+        const claim = yield* db.select().from(IssueSessionClaimTable).where(and(
+          eq(IssueSessionClaimTable.connection_id, match.connection_id),
+          eq(IssueSessionClaimTable.external_id, match.external_id),
+        )).get().pipe(Effect.orDie)
+        const materialized = claim
+          ? yield* db.select().from(IssueMaterializationTable).where(eq(IssueMaterializationTable.id, claim.materialization_id)).get().pipe(Effect.orDie)
+          : undefined
+        const baseline = materialized
+          ? yield* db.select().from(IssueMatchObservationTable).where(eq(IssueMatchObservationTable.id, materialized.baseline_observation_id)).get().pipe(Effect.orDie)
+          : undefined
+        if (!current || !baseline || !materialized) return yield* new MatchConflictError({ id, detail: "Duplicate history is incomplete" })
+        const links = yield* db.select().from(IssueMatchSessionTable)
+          .where(eq(IssueMatchSessionTable.match_id, materialized.match_id)).all().pipe(Effect.orDie)
+        const storedLinks = links.map((row) => decodeLink({
+          id: row.id,
+          matchID: row.match_id,
+          sessionID: row.session_id,
+          isPrimary: row.is_primary,
+          reason: row.reason,
+          ...(row.deleted_at ? { deletedAt: row.deleted_at } : {}),
+          timeCreated: row.time_created,
+          timeUpdated: row.time_updated,
+        }))
+        return IssueWatcher.DuplicateDetail.make({
+          match: storedMatch(match),
+          baseline: storedObservation(baseline),
+          current: storedObservation(current),
+          sessions: storedLinks,
+          ...(storedLinks.find((link) => link.isPrimary) ? { primary: storedLinks.find((link) => link.isPrimary) } : {}),
+          diff: Object.keys(current.payload).flatMap((field) => {
+            const before = baseline.payload[field as keyof Issue.Info]
+            const after = current.payload[field as keyof Issue.Info]
+            return canonicalJson(before as Schema.Json) === canonicalJson(after as Schema.Json)
+              ? []
+              : [{ field, before: before as Schema.Json, after: after as Schema.Json }]
+          }),
+        })
+      }),
+      resolveDuplicate: Effect.fn("IssueWatcher.resolveDuplicate")(function* (id, input) {
+        const detail = yield* service.duplicateDetail(id)
+        if (input.action === "ignore") {
+          yield* materialization.ignore(id, "Duplicate ignored")
+          return IssueWatcher.DuplicateResolutionResult.make({ status: "ignored" })
+        }
+        if (input.action === "continue") {
+          if (!detail.primary) return yield* new MatchConflictError({ id, detail: "Duplicate has no primary Session" })
+          yield* sessions.get(detail.primary.sessionID).pipe(
+            Effect.mapError(() => new MatchConflictError({ id, detail: "Primary Session no longer exists" })),
+          )
+          const watcher = yield* get(detail.match.watcherID).pipe(
+            Effect.mapError(() => new MatchConflictError({ id, detail: "Issue watcher no longer exists" })),
+          )
+          const project = detail.match.projectID
+            ? (yield* projectCatalog.list()).find((item) => item.projectID === detail.match.projectID)
+            : undefined
+          yield* sessions.prompt({
+            id: SessionMessage.ID.make(`msg_${Hash.sha256(`continue\0${id}\0${detail.current.fingerprint}`).slice(0, 28)}`),
+            sessionID: detail.primary.sessionID,
+            prompt: { text: renderPrompt(detail.current.payload, project, watcher.action.promptTemplate) },
+          }).pipe(Effect.mapError(() => new MatchConflictError({ id, detail: "Current issue update conflicts with existing Session input" })))
+          yield* db.insert(IssueMatchSessionTable).values({
+            id: IssueMatch.SessionLinkID.create(),
+            match_id: id,
+            session_id: detail.primary.sessionID,
+            is_primary: false,
+            reason: "continued",
+          }).onConflictDoNothing().run().pipe(Effect.orDie)
+          return IssueWatcher.DuplicateResolutionResult.make({ status: "continued", sessionID: detail.primary.sessionID })
+        }
+        const match = yield* requireMatch(id)
+        const projectID = input.projectID ?? (match.project_id ? Project.ID.make(match.project_id) : undefined)
+        if (!projectID) return yield* new MatchConflictError({ id, detail: "Issue match is not routed" })
+        yield* projectCatalog.resolve(projectID).pipe(Effect.mapError(() => new ProjectNotFoundError({ id: projectID })))
+        const value = yield* materialization.materialize({
+          matchID: id,
+          mode: input.mode ?? "awaiting_run",
+          projectID,
+          ...(input.workspace ? { workspace: input.workspace } : {}),
+          secondary: true,
+        })
+        if (!value) return IssueWatcher.DuplicateResolutionResult.make({ status: "queued", reason: "concurrency_limit" })
+        if ("_tag" in value) return yield* new MatchConflictError({ id, detail: "Issue match is duplicate" })
+        if (value.state === "failed") return yield* new MatchConflictError({
+          id,
+          detail: value.error ?? "Issue materialization failed",
+        })
+        return IssueWatcher.DuplicateResolutionResult.make({
+          status: "created",
+          materializationID: value.id,
+          sessionID: value.sessionID,
+        })
+      }),
+      bulk: Effect.fn("IssueWatcher.bulk")(function* (input) {
+        const items = yield* Effect.forEach(input.matchIDs, (id) => Effect.exit(
+          input.action === "skip" ? service.skip(id).pipe(Effect.as(undefined))
+            : input.action === "dismiss" ? service.dismiss(id).pipe(Effect.as(undefined))
+            : materializeResult(id, { mode: input.mode ?? "awaiting_run" }),
+        ))
+        return IssueWatcher.BulkResult.make({
+          items: items.map((exit, index) => Exit.isSuccess(exit)
+            ? { status: "succeeded", matchID: input.matchIDs[index]!, ...(exit.value ? { materialization: exit.value } : {}) }
+            : { status: "failed", matchID: input.matchIDs[index]!, error: bulkError(exit.cause) }),
+        })
+      }),
+      addIgnore: Effect.fn("IssueWatcher.addIgnore")(function* (id, input) {
+        yield* get(id)
+        yield* db.insert(IssueWatcherIgnoreTable).values({ watcher_id: id, external_id: input.externalID, reason: input.reason })
+          .onConflictDoUpdate({ target: [IssueWatcherIgnoreTable.watcher_id, IssueWatcherIgnoreTable.external_id], set: { reason: input.reason } }).run().pipe(Effect.orDie)
+        const row = yield* db.select().from(IssueWatcherIgnoreTable).where(and(
+          eq(IssueWatcherIgnoreTable.watcher_id, id),
+          eq(IssueWatcherIgnoreTable.external_id, input.externalID),
+        )).get().pipe(Effect.orDie)
+        if (!row) return yield* Effect.die("Inserted issue watcher ignore was not found")
+        return storedIgnore(row)
+      }),
+      removeIgnore: Effect.fn("IssueWatcher.removeIgnore")(function* (id, externalID) {
+        yield* get(id)
+        yield* db.delete(IssueWatcherIgnoreTable).where(and(
+          eq(IssueWatcherIgnoreTable.watcher_id, id),
+          eq(IssueWatcherIgnoreTable.external_id, externalID),
+        )).run().pipe(Effect.orDie)
+      }),
+      provenanceDetail,
+      syncProvenance: Effect.fn("IssueWatcher.syncProvenance")(function* (sessionID) {
+        const detail = yield* provenanceDetail(sessionID)
+        const adapter = yield* provider(detail.provenance.integrationID)
+        const credential = yield* ownedConnection(detail.provenance.integrationID, detail.provenance.connectionID)
+        const issue = yield* adapter.get(credential, detail.provenance.externalKey)
+        const now = Date.now()
+        yield* db.transaction((tx) => Effect.gen(function* () {
+          if (detail.provenance.matchID) {
+            yield* tx.update(IssueMatchTable).set({
+              external_key: issue.key,
+              external_url: issue.url,
+              external_updated_at: issue.updatedAt,
+              fingerprint: fingerprint(issue),
+              payload: issue,
+            }).where(eq(IssueMatchTable.id, detail.provenance.matchID)).run()
+          }
+          yield* tx.update(SessionProvenanceTable).set({
+            external_key: issue.key,
+            external_url: issue.url,
+            last_synced_at: now,
+          }).where(eq(SessionProvenanceTable.session_id, sessionID)).run()
+        })).pipe(Effect.orDie)
+        return yield* provenanceDetail(sessionID)
+      }),
     })
 
     yield* Effect.gen(function* () {
       if (owner.status().status !== "active") return
+      yield* materialization.reconcile()
+      yield* reconcileAutomatic()
       const lastPoll = yield* Ref.make(0)
       yield* Effect.gen(function* () {
         const now = Date.now()
         const interval = (yield* config.getIssueWatcher()).pollInterval ?? 120
+        yield* reconcileAutomatic()
         if (now - (yield* Ref.get(lastPoll)) >= interval * 1000) {
           yield* service.runAll()
           yield* Ref.set(lastPoll, Date.now())
@@ -1034,5 +1496,5 @@ const layer = Layer.effect(
 export const node = makeGlobalNode({
   service: Service,
   layer,
-  deps: [Database.node, EventV2.node, GlobalConfig.node, Credential.node, IssueProvider.node, IssueWatcherOwner.node, ProjectRoutingCatalog.node, WorkspaceProvisioner.node],
+  deps: [Database.node, EventV2.node, GlobalConfig.node, Credential.node, IssueProvider.node, IssueWatcherOwner.node, ProjectRoutingCatalog.node, WorkspaceProvisioner.node, SessionV2.node],
 })

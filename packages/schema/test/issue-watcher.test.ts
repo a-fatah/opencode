@@ -141,4 +141,22 @@ describe("issue watcher contracts", () => {
     ).toBe("run")
     expect(Schema.decodeUnknownSync(IssueWatcher.InboxPage)({ items: [] })).toEqual({ items: [] })
   })
+
+  test("defines Slice 8 action results as tagged contracts", () => {
+    expect(
+      Schema.decodeUnknownSync(IssueWatcher.MaterializeResult)({
+        status: "created",
+        materializationID: "imz_materialization",
+        sessionID: "ses_session",
+      }).status,
+    ).toBe("created")
+    expect(
+      Schema.decodeUnknownSync(IssueWatcher.BulkResult)({
+        items: [{ status: "failed", matchID: "imt_match", error: { code: "unrouted", message: "Pick a project" } }],
+      }).items[0]?.status,
+    ).toBe("failed")
+    expect(() =>
+      Schema.decodeUnknownSync(IssueWatcher.DuplicateResolutionInput)({ action: "create_second", mode: "inbox" }),
+    ).toThrow()
+  })
 })

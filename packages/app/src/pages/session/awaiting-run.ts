@@ -5,6 +5,8 @@ import { authTokenFromCredentials } from "@/utils/server"
 import { uuid } from "@/utils/uuid"
 
 export type AwaitingRunState = {
+  sessionID?: string
+  messageID?: string
   hydratedID?: string
   sourceText?: string
   locked: boolean
@@ -60,10 +62,26 @@ export function awaitingRunLocked(event: AwaitingRunEvent, sessionID: string) {
 }
 
 export function pendingHydration(state: AwaitingRunState, currentText: string, input: SessionInput.Pending) {
+  if (state.sessionID && state.sessionID !== input.sessionID) return input.prompt.text
+  if (state.messageID && state.messageID !== input.id) return input.prompt.text
   if (state.hydratedID === input.id) return
   if (state.sourceText === undefined && currentText.trim()) return
   if (state.sourceText !== undefined && currentText !== state.sourceText) return
   return input.prompt.text
+}
+
+export function awaitingRunPromptState(input: SessionInput.Pending, sourceText: string): AwaitingRunState {
+  return {
+    sessionID: input.sessionID,
+    messageID: input.id,
+    hydratedID: input.id,
+    sourceText,
+    locked: false,
+  }
+}
+
+export function clearedAwaitingRunState(): AwaitingRunState {
+  return { locked: true }
 }
 
 export function runAttemptID(state: AwaitingRunRetry, create: () => string) {

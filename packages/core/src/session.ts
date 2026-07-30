@@ -3,7 +3,7 @@ export * from "./session/schema"
 
 import { DateTime, Effect, Layer, Schema, Context, Stream } from "effect"
 import { ListAnchor } from "@opencode-ai/schema/session"
-import { and, asc, desc, eq, gt, like, lt, or, type SQL } from "drizzle-orm"
+import { and, asc, desc, eq, gt, inArray, like, lt, or, type SQL } from "drizzle-orm"
 import { ProjectV2 } from "./project"
 import { WorkspaceV2 } from "./workspace"
 import { ModelV2 } from "./model"
@@ -49,6 +49,8 @@ import {
   ConfirmHandoffInput,
 } from "@opencode-ai/schema/session-input"
 import { SessionExecutionAttempt } from "./session/execution-attempt"
+import { SessionProvenanceTable } from "./issue-watcher/sql"
+import { Integration } from "@opencode-ai/schema/integration"
 
 export const RevertState = Revert.State
 export type RevertState = Revert.State
@@ -235,7 +237,26 @@ const layer = Layer.effect(
         ),
       )
     const enrich = Effect.fn("V2Session.enrich")(function* (sessions: ReadonlyArray<SessionSchema.Info>) {
-      return yield* store.enrich(sessions, yield* execution.active, execution.ownerEpoch)
+      const enriched = yield* store.enrich(sessions, yield* execution.active, execution.ownerEpoch)
+      if (!enriched.length) return enriched
+      const provenance = yield* db.select().from(SessionProvenanceTable)
+        .where(inArray(SessionProvenanceTable.session_id, enriched.map((session) => session.id))).all().pipe(Effect.orDie)
+      return enriched.map((session) => {
+        const source = provenance.find((item) => item.session_id === session.id)
+        if (!source) return session
+        return SessionSchema.Info.make({
+          ...session,
+          provenance: {
+            type: "issue",
+            integrationID: Integration.ID.make(source.integration_id),
+            externalKey: source.external_key,
+            externalUrl: source.external_url,
+            ...(source.watcher_id ? { watcherID: source.watcher_id } : {}),
+            watcherName: source.watcher_name,
+            ...(source.branch ? { branch: source.branch } : {}),
+          },
+        })
+      })
     })
 
     const result = Service.of({

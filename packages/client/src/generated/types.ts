@@ -88,6 +88,38 @@ export type InvalidCursorError = { readonly _tag: "InvalidCursorError"; readonly
 export const isInvalidCursorError = (value: unknown): value is InvalidCursorError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "InvalidCursorError"
 
+export type IssueMatchNotFoundError = {
+  readonly _tag: "IssueMatchNotFoundError"
+  readonly matchID: string
+  readonly message: string
+}
+export const isIssueMatchNotFoundError = (value: unknown): value is IssueMatchNotFoundError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "IssueMatchNotFoundError"
+
+export type IssueWatcherProjectNotFoundError = {
+  readonly _tag: "IssueWatcherProjectNotFoundError"
+  readonly projectID: string
+  readonly message: string
+}
+export const isIssueWatcherProjectNotFoundError = (value: unknown): value is IssueWatcherProjectNotFoundError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "IssueWatcherProjectNotFoundError"
+
+export type IssueMatchConflictError = {
+  readonly _tag: "IssueMatchConflictError"
+  readonly matchID: string
+  readonly message: string
+}
+export const isIssueMatchConflictError = (value: unknown): value is IssueMatchConflictError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "IssueMatchConflictError"
+
+export type IssueWatcherSessionNotFoundError = {
+  readonly _tag: "IssueWatcherSessionNotFoundError"
+  readonly sessionID: string
+  readonly message: string
+}
+export const isIssueWatcherSessionNotFoundError = (value: unknown): value is IssueWatcherSessionNotFoundError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "IssueWatcherSessionNotFoundError"
+
 export type SessionNotFoundError = {
   readonly _tag: "SessionNotFoundError"
   readonly sessionID: string
@@ -499,6 +531,27 @@ export type IssueWatchersRotateConnectionOutput = {
   readonly watcherCount: number
   readonly lastPollAt?: number
   readonly owner: { readonly status: "active" | "owner_conflict" | "disabled"; readonly detail?: string }
+}
+
+export type IssueWatchersMetadataInput = {
+  readonly integrationID: { readonly integrationID: string; readonly connectionID: string }["integrationID"]
+  readonly connectionID: { readonly integrationID: string; readonly connectionID: string }["connectionID"]
+  readonly issueProjects: { readonly issueProjects: ReadonlyArray<string> }["issueProjects"]
+}
+
+export type IssueWatchersMetadataOutput = {
+  readonly projects: ReadonlyArray<{
+    readonly id: string
+    readonly key: string
+    readonly name: string
+    readonly imageUrl?: string
+  }>
+  readonly users: ReadonlyArray<{ readonly id: string; readonly name: string; readonly imageUrl?: string }>
+  readonly labels: ReadonlyArray<string>
+  readonly statuses: ReadonlyArray<{ readonly id: string; readonly name: string; readonly imageUrl?: string }>
+  readonly components: ReadonlyArray<{ readonly id: string; readonly name: string; readonly imageUrl?: string }>
+  readonly issueTypes: ReadonlyArray<{ readonly id: string; readonly name: string; readonly imageUrl?: string }>
+  readonly fields: ReadonlyArray<{ readonly id: string; readonly name: string; readonly imageUrl?: string }>
 }
 
 export type IssueWatchersPreviewInput = {
@@ -1669,6 +1722,56 @@ export type IssueWatchersInboxOutput = {
     readonly watcherName: string
     readonly project?: { readonly id: string; readonly name: string }
     readonly suggestion?: { readonly id: string; readonly name: string }
+    readonly materialization?: {
+      readonly id: string
+      readonly matchID: string
+      readonly mode: "awaiting_run" | "run"
+      readonly projectID: string
+      readonly workspace:
+        | { readonly type: "branch"; readonly pattern: string }
+        | { readonly type: "current" }
+        | { readonly type: "worktree" }
+      readonly resolvedLocation?: { readonly directory: string; readonly workspaceID?: string }
+      readonly workspaceLease?: {
+        readonly id: string
+        readonly ownerID: string
+        readonly inputKey: string
+        readonly projectID: string
+        readonly strategy:
+          | { readonly type: "branch"; readonly pattern: string }
+          | { readonly type: "current" }
+          | { readonly type: "worktree" }
+        readonly sourceDirectory: string
+        readonly sourceCommonDirectory?: string
+        readonly location: { readonly directory: string; readonly workspaceID?: string }
+        readonly ownership: "borrowed" | "branch" | "worktree"
+        readonly baseRevision?: string
+        readonly sourceBranch?: string
+        readonly sourceDetached?: boolean
+        readonly branch?: string
+        readonly cleanupToken?: string
+        readonly setupCommand?: string
+      }
+      readonly baselineObservationID: string
+      readonly state:
+        | "pending"
+        | "provisioning"
+        | "session_created"
+        | "prompt_admitted"
+        | "scheduled"
+        | "handoff_unknown"
+        | "completed"
+        | "failed"
+        | "cancelled"
+      readonly sessionID: string
+      readonly messageID: string
+      readonly executionAttemptID?: string
+      readonly providerStarted: boolean
+      readonly attempts: number
+      readonly error?: string
+      readonly timeCreated: number
+      readonly timeUpdated: number
+    }
   }>
   readonly nextCursor?: string
 }
@@ -1680,6 +1783,530 @@ export type IssueWatchersInboxSummaryOutput = {
   readonly failedMaterializations: number
   readonly sessionsOpenedThisWeek: number
   readonly failedRuns: number
+}
+
+export type IssueWatchersBulkInput = {
+  readonly matchIDs: {
+    readonly matchIDs: ReadonlyArray<string>
+    readonly action: "approve" | "skip" | "dismiss"
+    readonly mode?: "run" | "awaiting_run"
+  }["matchIDs"]
+  readonly action: {
+    readonly matchIDs: ReadonlyArray<string>
+    readonly action: "approve" | "skip" | "dismiss"
+    readonly mode?: "run" | "awaiting_run"
+  }["action"]
+  readonly mode?: {
+    readonly matchIDs: ReadonlyArray<string>
+    readonly action: "approve" | "skip" | "dismiss"
+    readonly mode?: "run" | "awaiting_run"
+  }["mode"]
+}
+
+export type IssueWatchersBulkOutput = {
+  readonly items: ReadonlyArray<
+    | {
+        readonly status: "succeeded"
+        readonly matchID: string
+        readonly materialization?:
+          | { readonly status: "created"; readonly materializationID: string; readonly sessionID: string }
+          | { readonly status: "queued"; readonly reason: "concurrency_limit" }
+      }
+    | {
+        readonly status: "failed"
+        readonly matchID: string
+        readonly error: {
+          readonly code: "not_found" | "invalid_state" | "unrouted" | "duplicate" | "materialization_failed"
+          readonly message: string
+        }
+      }
+  >
+}
+
+export type IssueWatchersApproveInput = {
+  readonly matchID: { readonly matchID: string }["matchID"]
+  readonly mode: {
+    readonly mode: "run" | "awaiting_run"
+    readonly projectID?: string
+    readonly workspace?:
+      | { readonly type: "branch"; readonly pattern: string }
+      | { readonly type: "current" }
+      | { readonly type: "worktree" }
+  }["mode"]
+  readonly projectID?: {
+    readonly mode: "run" | "awaiting_run"
+    readonly projectID?: string
+    readonly workspace?:
+      | { readonly type: "branch"; readonly pattern: string }
+      | { readonly type: "current" }
+      | { readonly type: "worktree" }
+  }["projectID"]
+  readonly workspace?: {
+    readonly mode: "run" | "awaiting_run"
+    readonly projectID?: string
+    readonly workspace?:
+      | { readonly type: "branch"; readonly pattern: string }
+      | { readonly type: "current" }
+      | { readonly type: "worktree" }
+  }["workspace"]
+}
+
+export type IssueWatchersApproveOutput =
+  | { readonly status: "created"; readonly materializationID: string; readonly sessionID: string }
+  | { readonly status: "queued"; readonly reason: "concurrency_limit" }
+
+export type IssueWatchersRouteMatchInput = {
+  readonly matchID: { readonly matchID: string }["matchID"]
+  readonly projectID: { readonly projectID: string; readonly persistMapping?: boolean }["projectID"]
+  readonly persistMapping?: { readonly projectID: string; readonly persistMapping?: boolean }["persistMapping"]
+}
+
+export type IssueWatchersRouteMatchOutput = void
+
+export type IssueWatchersSkipInput = { readonly matchID: { readonly matchID: string }["matchID"] }
+
+export type IssueWatchersSkipOutput = void
+
+export type IssueWatchersDismissInput = { readonly matchID: { readonly matchID: string }["matchID"] }
+
+export type IssueWatchersDismissOutput = void
+
+export type IssueWatchersRematerializeInput = {
+  readonly matchID: { readonly matchID: string }["matchID"]
+  readonly mode: {
+    readonly mode: "run" | "awaiting_run"
+    readonly projectID?: string
+    readonly workspace?:
+      | { readonly type: "branch"; readonly pattern: string }
+      | { readonly type: "current" }
+      | { readonly type: "worktree" }
+  }["mode"]
+  readonly projectID?: {
+    readonly mode: "run" | "awaiting_run"
+    readonly projectID?: string
+    readonly workspace?:
+      | { readonly type: "branch"; readonly pattern: string }
+      | { readonly type: "current" }
+      | { readonly type: "worktree" }
+  }["projectID"]
+  readonly workspace?: {
+    readonly mode: "run" | "awaiting_run"
+    readonly projectID?: string
+    readonly workspace?:
+      | { readonly type: "branch"; readonly pattern: string }
+      | { readonly type: "current" }
+      | { readonly type: "worktree" }
+  }["workspace"]
+}
+
+export type IssueWatchersRematerializeOutput =
+  | { readonly status: "created"; readonly materializationID: string; readonly sessionID: string }
+  | { readonly status: "queued"; readonly reason: "concurrency_limit" }
+
+export type IssueWatchersDuplicateDetailInput = { readonly matchID: { readonly matchID: string }["matchID"] }
+
+export type IssueWatchersDuplicateDetailOutput = {
+  readonly match: {
+    readonly id: string
+    readonly watcherID: string
+    readonly integrationID: string
+    readonly connectionID: string
+    readonly externalID: string
+    readonly externalKey: string
+    readonly externalUrl: string
+    readonly fingerprint: string
+    readonly externalUpdatedAt: number
+    readonly state: "pending" | "skipped" | "dismissed" | "duplicate" | "unrouted"
+    readonly projectID?: string
+    readonly routeReason?: string
+    readonly payload: {
+      readonly id: string
+      readonly key: string
+      readonly title: string
+      readonly description: string
+      readonly url: string
+      readonly status: string
+      readonly assignee?: { readonly id: string; readonly name: string }
+      readonly labels: ReadonlyArray<string>
+      readonly issueProject: string
+      readonly component?: string
+      readonly acceptanceCriteria?: string
+      readonly repoField?: string
+      readonly updatedAt: number
+      readonly raw: JsonValue
+    }
+    readonly error?: string
+    readonly timeCreated: number
+    readonly timeUpdated: number
+  }
+  readonly baseline: {
+    readonly id: string
+    readonly matchID: string
+    readonly runID: string
+    readonly fingerprint: string
+    readonly externalUpdatedAt: number
+    readonly payload: {
+      readonly id: string
+      readonly key: string
+      readonly title: string
+      readonly description: string
+      readonly url: string
+      readonly status: string
+      readonly assignee?: { readonly id: string; readonly name: string }
+      readonly labels: ReadonlyArray<string>
+      readonly issueProject: string
+      readonly component?: string
+      readonly acceptanceCriteria?: string
+      readonly repoField?: string
+      readonly updatedAt: number
+      readonly raw: JsonValue
+    }
+    readonly timeCreated: number
+    readonly timeUpdated: number
+  }
+  readonly current: {
+    readonly id: string
+    readonly matchID: string
+    readonly runID: string
+    readonly fingerprint: string
+    readonly externalUpdatedAt: number
+    readonly payload: {
+      readonly id: string
+      readonly key: string
+      readonly title: string
+      readonly description: string
+      readonly url: string
+      readonly status: string
+      readonly assignee?: { readonly id: string; readonly name: string }
+      readonly labels: ReadonlyArray<string>
+      readonly issueProject: string
+      readonly component?: string
+      readonly acceptanceCriteria?: string
+      readonly repoField?: string
+      readonly updatedAt: number
+      readonly raw: JsonValue
+    }
+    readonly timeCreated: number
+    readonly timeUpdated: number
+  }
+  readonly sessions: ReadonlyArray<{
+    readonly id: string
+    readonly matchID: string
+    readonly sessionID: string
+    readonly isPrimary: boolean
+    readonly reason: "materialized" | "continued" | "duplicate_override"
+    readonly deletedAt?: number
+    readonly timeCreated: number
+    readonly timeUpdated: number
+  }>
+  readonly primary?: {
+    readonly id: string
+    readonly matchID: string
+    readonly sessionID: string
+    readonly isPrimary: boolean
+    readonly reason: "materialized" | "continued" | "duplicate_override"
+    readonly deletedAt?: number
+    readonly timeCreated: number
+    readonly timeUpdated: number
+  }
+  readonly diff: ReadonlyArray<{ readonly field: string; readonly before?: JsonValue; readonly after?: JsonValue }>
+}
+
+export type IssueWatchersResolveDuplicateInput = {
+  readonly matchID: { readonly matchID: string }["matchID"]
+  readonly action: {
+    readonly action: "continue" | "create_second" | "ignore"
+    readonly mode?: "run" | "awaiting_run"
+    readonly projectID?: string
+    readonly workspace?:
+      | { readonly type: "branch"; readonly pattern: string }
+      | { readonly type: "current" }
+      | { readonly type: "worktree" }
+  }["action"]
+  readonly mode?: {
+    readonly action: "continue" | "create_second" | "ignore"
+    readonly mode?: "run" | "awaiting_run"
+    readonly projectID?: string
+    readonly workspace?:
+      | { readonly type: "branch"; readonly pattern: string }
+      | { readonly type: "current" }
+      | { readonly type: "worktree" }
+  }["mode"]
+  readonly projectID?: {
+    readonly action: "continue" | "create_second" | "ignore"
+    readonly mode?: "run" | "awaiting_run"
+    readonly projectID?: string
+    readonly workspace?:
+      | { readonly type: "branch"; readonly pattern: string }
+      | { readonly type: "current" }
+      | { readonly type: "worktree" }
+  }["projectID"]
+  readonly workspace?: {
+    readonly action: "continue" | "create_second" | "ignore"
+    readonly mode?: "run" | "awaiting_run"
+    readonly projectID?: string
+    readonly workspace?:
+      | { readonly type: "branch"; readonly pattern: string }
+      | { readonly type: "current" }
+      | { readonly type: "worktree" }
+  }["workspace"]
+}
+
+export type IssueWatchersResolveDuplicateOutput =
+  | { readonly status: "continued"; readonly sessionID: string }
+  | (
+      | { readonly status: "created"; readonly materializationID: string; readonly sessionID: string }
+      | { readonly status: "queued"; readonly reason: "concurrency_limit" }
+    )
+  | { readonly status: "ignored" }
+
+export type IssueWatchersAddIgnoreInput = {
+  readonly watcherID: { readonly watcherID: string }["watcherID"]
+  readonly externalID: { readonly externalID: string; readonly reason?: string }["externalID"]
+  readonly reason?: { readonly externalID: string; readonly reason?: string }["reason"]
+}
+
+export type IssueWatchersAddIgnoreOutput = {
+  readonly watcherID: string
+  readonly externalID: string
+  readonly reason?: string
+  readonly timeCreated: number
+  readonly timeUpdated: number
+}
+
+export type IssueWatchersRemoveIgnoreInput = {
+  readonly watcherID: { readonly watcherID: string; readonly externalID: string }["watcherID"]
+  readonly externalID: { readonly watcherID: string; readonly externalID: string }["externalID"]
+}
+
+export type IssueWatchersRemoveIgnoreOutput = void
+
+export type IssueWatchersProvenanceDetailInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type IssueWatchersProvenanceDetailOutput = {
+  readonly provenance: {
+    readonly sessionID: string
+    readonly kind: "issue"
+    readonly watcherID?: string
+    readonly matchID?: string
+    readonly integrationID: string
+    readonly connectionID: string
+    readonly externalKey: string
+    readonly externalUrl: string
+    readonly watcherName: string
+    readonly branch?: string
+    readonly lastSyncedAt?: number
+    readonly timeCreated: number
+    readonly timeUpdated: number
+  }
+  readonly issue: {
+    readonly id: string
+    readonly key: string
+    readonly title: string
+    readonly description: string
+    readonly url: string
+    readonly status: string
+    readonly assignee?: { readonly id: string; readonly name: string }
+    readonly labels: ReadonlyArray<string>
+    readonly issueProject: string
+    readonly component?: string
+    readonly acceptanceCriteria?: string
+    readonly repoField?: string
+    readonly updatedAt: number
+    readonly raw: JsonValue
+  }
+  readonly source: { readonly integrationID: string; readonly name: string; readonly glyph: string }
+  readonly watcher: { readonly id?: string; readonly name: string }
+  readonly branch?: string
+  readonly workspace?: { readonly directory: string; readonly workspaceID?: string }
+  readonly sessions: ReadonlyArray<{
+    readonly id: string
+    readonly matchID: string
+    readonly sessionID: string
+    readonly isPrimary: boolean
+    readonly reason: "materialized" | "continued" | "duplicate_override"
+    readonly deletedAt?: number
+    readonly timeCreated: number
+    readonly timeUpdated: number
+  }>
+  readonly materialization?: {
+    readonly id: string
+    readonly matchID: string
+    readonly mode: "awaiting_run" | "run"
+    readonly projectID: string
+    readonly workspace:
+      | { readonly type: "branch"; readonly pattern: string }
+      | { readonly type: "current" }
+      | { readonly type: "worktree" }
+    readonly resolvedLocation?: { readonly directory: string; readonly workspaceID?: string }
+    readonly workspaceLease?: {
+      readonly id: string
+      readonly ownerID: string
+      readonly inputKey: string
+      readonly projectID: string
+      readonly strategy:
+        | { readonly type: "branch"; readonly pattern: string }
+        | { readonly type: "current" }
+        | { readonly type: "worktree" }
+      readonly sourceDirectory: string
+      readonly sourceCommonDirectory?: string
+      readonly location: { readonly directory: string; readonly workspaceID?: string }
+      readonly ownership: "borrowed" | "branch" | "worktree"
+      readonly baseRevision?: string
+      readonly sourceBranch?: string
+      readonly sourceDetached?: boolean
+      readonly branch?: string
+      readonly cleanupToken?: string
+      readonly setupCommand?: string
+    }
+    readonly baselineObservationID: string
+    readonly state:
+      | "pending"
+      | "provisioning"
+      | "session_created"
+      | "prompt_admitted"
+      | "scheduled"
+      | "handoff_unknown"
+      | "completed"
+      | "failed"
+      | "cancelled"
+    readonly sessionID: string
+    readonly messageID: string
+    readonly executionAttemptID?: string
+    readonly providerStarted: boolean
+    readonly attempts: number
+    readonly error?: string
+    readonly timeCreated: number
+    readonly timeUpdated: number
+  }
+  readonly writebacks: ReadonlyArray<{
+    readonly id: string
+    readonly sessionID: string
+    readonly kind: "comment_created" | "transition_started" | "comment_failed"
+    readonly triggerID: string
+    readonly request: JsonValue
+    readonly state: "pending" | "applying" | "applied" | "unknown" | "failed"
+    readonly providerResultID?: string
+    readonly attempts: number
+    readonly error?: string
+    readonly timeCreated: number
+    readonly timeUpdated: number
+  }>
+  readonly lastSyncedAt?: number
+}
+
+export type IssueWatchersSyncProvenanceInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type IssueWatchersSyncProvenanceOutput = {
+  readonly provenance: {
+    readonly sessionID: string
+    readonly kind: "issue"
+    readonly watcherID?: string
+    readonly matchID?: string
+    readonly integrationID: string
+    readonly connectionID: string
+    readonly externalKey: string
+    readonly externalUrl: string
+    readonly watcherName: string
+    readonly branch?: string
+    readonly lastSyncedAt?: number
+    readonly timeCreated: number
+    readonly timeUpdated: number
+  }
+  readonly issue: {
+    readonly id: string
+    readonly key: string
+    readonly title: string
+    readonly description: string
+    readonly url: string
+    readonly status: string
+    readonly assignee?: { readonly id: string; readonly name: string }
+    readonly labels: ReadonlyArray<string>
+    readonly issueProject: string
+    readonly component?: string
+    readonly acceptanceCriteria?: string
+    readonly repoField?: string
+    readonly updatedAt: number
+    readonly raw: JsonValue
+  }
+  readonly source: { readonly integrationID: string; readonly name: string; readonly glyph: string }
+  readonly watcher: { readonly id?: string; readonly name: string }
+  readonly branch?: string
+  readonly workspace?: { readonly directory: string; readonly workspaceID?: string }
+  readonly sessions: ReadonlyArray<{
+    readonly id: string
+    readonly matchID: string
+    readonly sessionID: string
+    readonly isPrimary: boolean
+    readonly reason: "materialized" | "continued" | "duplicate_override"
+    readonly deletedAt?: number
+    readonly timeCreated: number
+    readonly timeUpdated: number
+  }>
+  readonly materialization?: {
+    readonly id: string
+    readonly matchID: string
+    readonly mode: "awaiting_run" | "run"
+    readonly projectID: string
+    readonly workspace:
+      | { readonly type: "branch"; readonly pattern: string }
+      | { readonly type: "current" }
+      | { readonly type: "worktree" }
+    readonly resolvedLocation?: { readonly directory: string; readonly workspaceID?: string }
+    readonly workspaceLease?: {
+      readonly id: string
+      readonly ownerID: string
+      readonly inputKey: string
+      readonly projectID: string
+      readonly strategy:
+        | { readonly type: "branch"; readonly pattern: string }
+        | { readonly type: "current" }
+        | { readonly type: "worktree" }
+      readonly sourceDirectory: string
+      readonly sourceCommonDirectory?: string
+      readonly location: { readonly directory: string; readonly workspaceID?: string }
+      readonly ownership: "borrowed" | "branch" | "worktree"
+      readonly baseRevision?: string
+      readonly sourceBranch?: string
+      readonly sourceDetached?: boolean
+      readonly branch?: string
+      readonly cleanupToken?: string
+      readonly setupCommand?: string
+    }
+    readonly baselineObservationID: string
+    readonly state:
+      | "pending"
+      | "provisioning"
+      | "session_created"
+      | "prompt_admitted"
+      | "scheduled"
+      | "handoff_unknown"
+      | "completed"
+      | "failed"
+      | "cancelled"
+    readonly sessionID: string
+    readonly messageID: string
+    readonly executionAttemptID?: string
+    readonly providerStarted: boolean
+    readonly attempts: number
+    readonly error?: string
+    readonly timeCreated: number
+    readonly timeUpdated: number
+  }
+  readonly writebacks: ReadonlyArray<{
+    readonly id: string
+    readonly sessionID: string
+    readonly kind: "comment_created" | "transition_started" | "comment_failed"
+    readonly triggerID: string
+    readonly request: JsonValue
+    readonly state: "pending" | "applying" | "applied" | "unknown" | "failed"
+    readonly providerResultID?: string
+    readonly attempts: number
+    readonly error?: string
+    readonly timeCreated: number
+    readonly timeUpdated: number
+  }>
+  readonly lastSyncedAt?: number
 }
 
 export type IssueWatchersEnableInput = {

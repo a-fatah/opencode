@@ -7,6 +7,8 @@ import type {
   IssueWatchersCreateConnectionOutput,
   IssueWatchersRotateConnectionInput,
   IssueWatchersRotateConnectionOutput,
+  IssueWatchersMetadataInput,
+  IssueWatchersMetadataOutput,
   IssueWatchersPreviewInput,
   IssueWatchersPreviewOutput,
   IssueWatchersGetSettingsOutput,
@@ -31,6 +33,30 @@ import type {
   IssueWatchersInboxInput,
   IssueWatchersInboxOutput,
   IssueWatchersInboxSummaryOutput,
+  IssueWatchersBulkInput,
+  IssueWatchersBulkOutput,
+  IssueWatchersApproveInput,
+  IssueWatchersApproveOutput,
+  IssueWatchersRouteMatchInput,
+  IssueWatchersRouteMatchOutput,
+  IssueWatchersSkipInput,
+  IssueWatchersSkipOutput,
+  IssueWatchersDismissInput,
+  IssueWatchersDismissOutput,
+  IssueWatchersRematerializeInput,
+  IssueWatchersRematerializeOutput,
+  IssueWatchersDuplicateDetailInput,
+  IssueWatchersDuplicateDetailOutput,
+  IssueWatchersResolveDuplicateInput,
+  IssueWatchersResolveDuplicateOutput,
+  IssueWatchersAddIgnoreInput,
+  IssueWatchersAddIgnoreOutput,
+  IssueWatchersRemoveIgnoreInput,
+  IssueWatchersRemoveIgnoreOutput,
+  IssueWatchersProvenanceDetailInput,
+  IssueWatchersProvenanceDetailOutput,
+  IssueWatchersSyncProvenanceInput,
+  IssueWatchersSyncProvenanceOutput,
   IssueWatchersEnableInput,
   IssueWatchersEnableOutput,
   LocationGetInput,
@@ -345,6 +371,18 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ),
+      metadata: (input: IssueWatchersMetadataInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersMetadataOutput>(
+          {
+            method: "POST",
+            path: `/api/issue-watcher/integrations/${encodeURIComponent(input.integrationID)}/connection/${encodeURIComponent(input.connectionID)}/metadata`,
+            body: { issueProjects: input["issueProjects"] },
+            successStatus: 200,
+            declaredStatuses: [400, 404, 401, 502],
+            empty: false,
+          },
+          requestOptions,
+        ),
       preview: (input: IssueWatchersPreviewInput, requestOptions?: RequestOptions) =>
         request<IssueWatchersPreviewOutput>(
           {
@@ -534,6 +572,149 @@ export function make(options: ClientOptions) {
             path: `/api/issue-watcher/inbox/summary`,
             successStatus: 200,
             declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      bulk: (input: IssueWatchersBulkInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersBulkOutput>(
+          {
+            method: "POST",
+            path: `/api/issue-watcher/inbox/bulk`,
+            body: { matchIDs: input["matchIDs"], action: input["action"], mode: input["mode"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      approve: (input: IssueWatchersApproveInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersApproveOutput>(
+          {
+            method: "POST",
+            path: `/api/issue-watcher/inbox/${encodeURIComponent(input.matchID)}/approve`,
+            body: { mode: input["mode"], projectID: input["projectID"], workspace: input["workspace"] },
+            successStatus: 200,
+            declaredStatuses: [404, 409, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      routeMatch: (input: IssueWatchersRouteMatchInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersRouteMatchOutput>(
+          {
+            method: "POST",
+            path: `/api/issue-watcher/inbox/${encodeURIComponent(input.matchID)}/route`,
+            body: { projectID: input["projectID"], persistMapping: input["persistMapping"] },
+            successStatus: 204,
+            declaredStatuses: [404, 409, 401, 400],
+            empty: true,
+          },
+          requestOptions,
+        ),
+      skip: (input: IssueWatchersSkipInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersSkipOutput>(
+          {
+            method: "POST",
+            path: `/api/issue-watcher/inbox/${encodeURIComponent(input.matchID)}/skip`,
+            successStatus: 204,
+            declaredStatuses: [404, 409, 401, 400],
+            empty: true,
+          },
+          requestOptions,
+        ),
+      dismiss: (input: IssueWatchersDismissInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersDismissOutput>(
+          {
+            method: "POST",
+            path: `/api/issue-watcher/inbox/${encodeURIComponent(input.matchID)}/dismiss`,
+            successStatus: 204,
+            declaredStatuses: [404, 409, 401, 400],
+            empty: true,
+          },
+          requestOptions,
+        ),
+      rematerialize: (input: IssueWatchersRematerializeInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersRematerializeOutput>(
+          {
+            method: "POST",
+            path: `/api/issue-watcher/inbox/${encodeURIComponent(input.matchID)}/rematerialize`,
+            body: { mode: input["mode"], projectID: input["projectID"], workspace: input["workspace"] },
+            successStatus: 200,
+            declaredStatuses: [404, 409, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      duplicateDetail: (input: IssueWatchersDuplicateDetailInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersDuplicateDetailOutput>(
+          {
+            method: "GET",
+            path: `/api/issue-watcher/inbox/${encodeURIComponent(input.matchID)}/duplicate`,
+            successStatus: 200,
+            declaredStatuses: [404, 409, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      resolveDuplicate: (input: IssueWatchersResolveDuplicateInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersResolveDuplicateOutput>(
+          {
+            method: "POST",
+            path: `/api/issue-watcher/inbox/${encodeURIComponent(input.matchID)}/duplicate`,
+            body: {
+              action: input["action"],
+              mode: input["mode"],
+              projectID: input["projectID"],
+              workspace: input["workspace"],
+            },
+            successStatus: 200,
+            declaredStatuses: [404, 409, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      addIgnore: (input: IssueWatchersAddIgnoreInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersAddIgnoreOutput>(
+          {
+            method: "POST",
+            path: `/api/issue-watcher/watchers/${encodeURIComponent(input.watcherID)}/ignore`,
+            body: { externalID: input["externalID"], reason: input["reason"] },
+            successStatus: 200,
+            declaredStatuses: [404, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      removeIgnore: (input: IssueWatchersRemoveIgnoreInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersRemoveIgnoreOutput>(
+          {
+            method: "DELETE",
+            path: `/api/issue-watcher/watchers/${encodeURIComponent(input.watcherID)}/ignore/${encodeURIComponent(input.externalID)}`,
+            successStatus: 204,
+            declaredStatuses: [404, 401, 400],
+            empty: true,
+          },
+          requestOptions,
+        ),
+      provenanceDetail: (input: IssueWatchersProvenanceDetailInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersProvenanceDetailOutput>(
+          {
+            method: "GET",
+            path: `/api/issue-watcher/sessions/${encodeURIComponent(input.sessionID)}`,
+            successStatus: 200,
+            declaredStatuses: [404, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      syncProvenance: (input: IssueWatchersSyncProvenanceInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersSyncProvenanceOutput>(
+          {
+            method: "POST",
+            path: `/api/issue-watcher/sessions/${encodeURIComponent(input.sessionID)}/sync`,
+            successStatus: 200,
+            declaredStatuses: [404, 400, 401, 502],
             empty: false,
           },
           requestOptions,

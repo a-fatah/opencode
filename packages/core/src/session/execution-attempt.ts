@@ -2,7 +2,7 @@ export * as SessionExecutionAttempt from "./execution-attempt"
 
 import { and, desc, eq, inArray, ne } from "drizzle-orm"
 import { DateTime, Effect } from "effect"
-import { SessionExecutionAttempt as Contract } from "@opencode-ai/schema/session-execution-attempt"
+import { SessionExecutionAttempt } from "@opencode-ai/schema/session-execution-attempt"
 import type { Database } from "../database/database"
 import type { EventV2 } from "../event"
 import { SessionEvent } from "./event"
@@ -12,15 +12,15 @@ import { SessionExecutionAttemptTable } from "./sql"
 
 type DatabaseService = Database.Interface["db"]
 
-export const ID = Contract.ID
-export type ID = Contract.ID
-export const Info = Contract.Info
-export type Info = Contract.Info
-export const Interruption = Contract.Interruption
-export type Interruption = Contract.Interruption
+export const ID = SessionExecutionAttempt.ID
+export type ID = SessionExecutionAttempt.ID
+export const Info = SessionExecutionAttempt.Info
+export type Info = SessionExecutionAttempt.Info
+export const Interruption = SessionExecutionAttempt.Interruption
+export type Interruption = SessionExecutionAttempt.Interruption
 
 const fromRow = (row: typeof SessionExecutionAttemptTable.$inferSelect) =>
-  Contract.Info.make({
+  SessionExecutionAttempt.Info.make({
     id: row.id,
     sessionID: row.session_id,
     messageID: row.message_id,
@@ -98,7 +98,7 @@ export const publish = (
     | typeof SessionEvent.Execution.Failed
     | typeof SessionEvent.Execution.Interrupted,
   attempt: Info,
-  detail?: Contract.Failure | Contract.Interruption,
+  detail?: SessionExecutionAttempt.Failure | SessionExecutionAttempt.Interruption,
 ) =>
   DateTime.now.pipe(
     Effect.flatMap((timestamp) =>
@@ -108,9 +108,9 @@ export const publish = (
         messageID: attempt.messageID,
         ownerEpoch: attempt.ownerEpoch,
         timestamp,
-        ...(definition === SessionEvent.Execution.Failed ? { failure: detail as Contract.Failure } : {}),
+      ...(definition === SessionEvent.Execution.Failed ? { failure: detail as SessionExecutionAttempt.Failure } : {}),
         ...(definition === SessionEvent.Execution.Interrupted
-          ? { interruption: detail as Contract.Interruption }
+          ? { interruption: detail as SessionExecutionAttempt.Interruption }
           : {}),
       }),
     ),

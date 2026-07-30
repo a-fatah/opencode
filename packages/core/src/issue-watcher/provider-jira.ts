@@ -1,6 +1,7 @@
 import { Credential } from "@opencode-ai/schema/credential"
 import { Integration } from "@opencode-ai/schema/integration"
 import { Issue } from "@opencode-ai/schema/issue"
+import { IssueWatcher } from "@opencode-ai/schema/issue-watcher"
 import { Effect, Schema } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { IssueProvider } from "./provider"
@@ -35,6 +36,30 @@ const JiraSearch = Schema.Struct({
   names: Schema.optional(JiraNames),
   nextPageToken: Schema.optional(Schema.String),
 })
+const JiraAvatarUrls = Schema.Struct({ "24x24": Schema.optional(Schema.String) })
+const JiraProject = Schema.Struct({
+  id: Schema.String,
+  key: Schema.String,
+  name: Schema.String,
+  avatarUrls: Schema.optional(JiraAvatarUrls),
+})
+const JiraProjects = Schema.Struct({ values: Schema.Array(JiraProject), total: Schema.Number })
+const JiraMetadataUser = Schema.Struct({
+  accountId: Schema.String,
+  displayName: Schema.String,
+  active: Schema.optional(Schema.Boolean),
+  avatarUrls: Schema.optional(JiraAvatarUrls),
+})
+const JiraLabels = Schema.Struct({ values: Schema.Array(Schema.String) })
+const JiraStatus = Schema.Struct({ id: Schema.String, name: Schema.String })
+const JiraIssueTypeStatuses = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  iconUrl: Schema.optional(Schema.String),
+  statuses: Schema.Array(JiraStatus),
+})
+const JiraComponent = Schema.Struct({ id: Schema.String, name: Schema.String })
+const JiraField = Schema.Struct({ id: Schema.String, name: Schema.String, custom: Schema.Boolean })
 const Cursor = Schema.Struct({ updatedAt: Schema.Finite, externalID: Schema.String })
 
 export function makeJira(http: HttpClient.HttpClient): IssueProvider.Adapter {
@@ -109,6 +134,17 @@ export function makeJira(http: HttpClient.HttpClient): IssueProvider.Adapter {
       raw: issue,
     })
 
+  const projects = Effect.fn("Jira.projects")(function* (credential: Credential.Key) {
+    const first = yield* execute(credential, "/rest/api/3/project/search?startAt=0&maxResults=50", JiraProjects)
+    const offsets = Array.from({ length: Math.ceil(first.total / 50) - 1 }, (_, index) => (index + 1) * 50)
+    const remaining = yield* Effect.forEach(
+      offsets,
+      (startAt) => execute(credential, `/rest/api/3/project/search?startAt=${startAt}&maxResults=50`, JiraProjects),
+      { concurrency: "unbounded" },
+    )
+    return [first, ...remaining].flatMap((page) => page.values)
+  })
+
   return {
     integrationID,
     name: "Jira",
@@ -124,6 +160,62 @@ export function makeJira(http: HttpClient.HttpClient): IssueProvider.Adapter {
     verify: Effect.fn("Jira.verify")(function* (credential) {
       const user = yield* execute(credential, "/rest/api/3/myself", JiraUser)
       return { ok: true, detail: `Connected as ${user.displayName}` }
+    }),
+    metadata: Effect.fn("Jira.metadata")(function* (credential, input) {
+      const projectKeys = [...new Set(input.issueProjects)]
+      const jiraProjects = yield* projects(credential)
+      const userProjectKeys = projectKeys.length ? projectKeys : jiraProjects.map((project) => project.key)
+      const [labels, fields, users, projectMetadata] = yield* Effect.all([
+        execute(credential, "/rest/api/3/label?maxResults=1000", JiraLabels),
+        execute(credential, "/rest/api/3/field", Schema.Array(JiraField)),
+        Effect.forEach(
+          userProjectKeys,
+          (key) => execute(
+            credential,
+            `/rest/api/3/user/assignable/multiProjectSearch?${new URLSearchParams({ projectKeys: key, maxResults: "1000" })}`,
+            Schema.Array(JiraMetadataUser),
+          ).pipe(Effect.catchTag("IssueProvider.RequestError", () => Effect.succeed([]))),
+          { concurrency: 4 },
+        ).pipe(Effect.map((results) => results.flat())),
+        Effect.forEach(
+          projectKeys,
+          (key) => {
+            const encoded = encodeURIComponent(key)
+            return Effect.all([
+              execute(credential, `/rest/api/3/project/${encoded}/statuses`, Schema.Array(JiraIssueTypeStatuses)),
+              execute(credential, `/rest/api/3/project/${encoded}/components`, Schema.Array(JiraComponent)),
+            ])
+          },
+          { concurrency: "unbounded" },
+        ),
+      ], { concurrency: "unbounded" })
+      return Schema.decodeUnknownSync(IssueWatcher.Metadata)({
+        projects: jiraProjects.map((project) => ({
+          id: project.id,
+          key: project.key,
+          name: project.name,
+          ...(project.avatarUrls?.["24x24"] ? { imageUrl: project.avatarUrls["24x24"] } : {}),
+        })),
+        users: uniqueOptions(users
+          .filter((user) => user.active !== false)
+          .map((user) => ({
+            id: user.accountId,
+            name: user.displayName,
+            ...(user.avatarUrls?.["24x24"] ? { imageUrl: user.avatarUrls["24x24"] } : {}),
+          }))),
+        labels: [...new Set(labels.values)].sort((a, b) => a.localeCompare(b)),
+        statuses: uniqueOptions(projectMetadata.flatMap(([issueTypes]) =>
+          issueTypes.flatMap((issueType) => issueType.statuses.map((status) => ({ id: status.id, name: status.name }))))),
+        components: uniqueOptions(projectMetadata.flatMap(([, components]) =>
+          components.map((component) => ({ id: component.id, name: component.name })))),
+        issueTypes: uniqueOptions(projectMetadata.flatMap(([issueTypes]) =>
+          issueTypes.map((issueType) => ({
+            id: issueType.id,
+            name: issueType.name,
+            ...(issueType.iconUrl ? { imageUrl: issueType.iconUrl } : {}),
+          })))),
+        fields: uniqueOptions(fields.filter((field) => field.custom).map((field) => ({ id: field.id, name: field.name }))),
+      })
     }),
     search: Effect.fn("Jira.search")(function* (input) {
       const base = yield* site(input.credential.inputs ?? {})
@@ -198,6 +290,10 @@ export function makeJira(http: HttpClient.HttpClient): IssueProvider.Adapter {
     comment: () => new IssueProvider.NotImplementedError({ operation: "comment" }),
     transition: () => new IssueProvider.NotImplementedError({ operation: "transition" }),
   }
+}
+
+function uniqueOptions<T extends { readonly id: string; readonly name: string }>(options: ReadonlyArray<T>) {
+  return [...new Map(options.map((option) => [option.id, option])).values()].sort((a, b) => a.name.localeCompare(b.name))
 }
 
 const repositoryNames = new Set(["repository", "repo", "repositoryurl", "repourl"])

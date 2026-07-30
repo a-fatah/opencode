@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import type { OpenCodeEvent, SessionMessageInfo } from "@opencode-ai/client/promise"
-import { createV2SessionReducer } from "./server-session-v2-reducer"
+import type { SessionMessageInfo } from "@opencode-ai/client/promise"
+import { createV2SessionReducer, type NativeOpenCodeEvent } from "./server-session-v2-reducer"
 
-const event = (input: object) => input as OpenCodeEvent
+const event = (input: object) => input as NativeOpenCodeEvent
 const base = { created: 1, location: { directory: "/repo" }, durable: { aggregateID: "ses_1", seq: 1, version: 1 } }
 
 describe("v2 session reducer", () => {
@@ -34,8 +34,9 @@ describe("v2 session reducer", () => {
     apply({
       ...base,
       id: "evt_step",
-      type: "session.step.started",
+      type: "session.next.step.started",
       data: {
+        timestamp: 1,
         sessionID: "ses_1",
         assistantMessageID: "msg_assistant",
         agent: "build",
@@ -45,20 +46,20 @@ describe("v2 session reducer", () => {
     apply({
       ...base,
       id: "evt_text_start",
-      type: "session.text.started",
-      data: { sessionID: "ses_1", assistantMessageID: "msg_assistant", ordinal: 0 },
+      type: "session.next.text.started",
+      data: { timestamp: 1, sessionID: "ses_1", assistantMessageID: "msg_assistant", textID: "text_1" },
     })
     apply({
       ...base,
       id: "evt_text_delta",
-      type: "session.text.delta",
-      data: { sessionID: "ses_1", assistantMessageID: "msg_assistant", ordinal: 0, delta: "hel" },
+      type: "session.next.text.delta",
+      data: { timestamp: 1, sessionID: "ses_1", assistantMessageID: "msg_assistant", textID: "text_1", delta: "hel" },
     })
     apply({
       ...base,
       id: "evt_text_end",
-      type: "session.text.ended",
-      data: { sessionID: "ses_1", assistantMessageID: "msg_assistant", ordinal: 0, text: "hello" },
+      type: "session.next.text.ended",
+      data: { timestamp: 1, sessionID: "ses_1", assistantMessageID: "msg_assistant", textID: "text_1", text: "hello" },
     })
 
     expect(messages[0]).toMatchObject({ id: "msg_user", type: "user", text: "hello" })

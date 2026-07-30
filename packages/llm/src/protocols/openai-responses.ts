@@ -213,6 +213,8 @@ const OpenAIResponsesEvent = Schema.Struct({
   type: Schema.String,
   delta: Schema.optional(Schema.String),
   item_id: Schema.optional(Schema.String),
+  output_index: Schema.optional(Schema.Number),
+  content_index: Schema.optional(Schema.Number),
   summary_index: Schema.optional(Schema.Number),
   item: Schema.optional(OpenAIResponsesStreamItem),
   response: Schema.optional(
@@ -616,8 +618,14 @@ const TERMINAL_TYPES = new Set(["response.completed", "response.incomplete", "re
 const onOutputTextDelta = (state: ParserState, event: OpenAIResponsesEvent): StepResult => {
   if (!event.delta) return [state, NO_EVENTS]
   const events: LLMEvent[] = []
+  // Copilot rotates encrypted item IDs between deltas. The output/content slot
+  // is the stable Responses API identity for one text block.
+  const id =
+    event.output_index !== undefined || event.content_index !== undefined
+      ? `text-${event.output_index ?? 0}:${event.content_index ?? 0}`
+      : (event.item_id ?? "text-0")
   return [
-    { ...state, lifecycle: Lifecycle.textDelta(state.lifecycle, events, event.item_id ?? "text-0", event.delta) },
+    { ...state, lifecycle: Lifecycle.textDelta(state.lifecycle, events, id, event.delta) },
     events,
   ]
 }

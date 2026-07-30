@@ -1,6 +1,6 @@
 import { Binary } from "@opencode-ai/core/util/binary"
 import { retry } from "@opencode-ai/core/util/retry"
-import type { OpenCodeEvent, SessionApi, SessionMessageInfo } from "@opencode-ai/client/promise"
+import type { SessionApi, SessionMessageInfo } from "@opencode-ai/client/promise"
 import type {
   Message,
   OpencodeClient,
@@ -20,7 +20,11 @@ import { rootSession } from "@/utils/session-route"
 import { normalizeSessionInfo } from "@/utils/session"
 import { normalizeSessionMessages } from "@/utils/session-message"
 import { dropSessionCaches, pickSessionCacheEvictions, SESSION_CACHE_LIMIT } from "./global-sync/session-cache"
-import { createV2SessionReducer, type V2SessionReduction } from "./server-session-v2-reducer"
+import {
+  createV2SessionReducer,
+  type NativeOpenCodeEvent,
+  type V2SessionReduction,
+} from "./server-session-v2-reducer"
 import type { ServerApi } from "@/utils/server"
 
 type MessageApi = ServerApi["message"]
@@ -977,7 +981,7 @@ export function createServerSession(
       .catch(() => {})
   }
 
-  const applyV2 = (event: OpenCodeEvent) => {
+  const applyV2 = (event: NativeOpenCodeEvent) => {
     if (!("data" in event) || !("sessionID" in event.data) || typeof event.data.sessionID !== "string") return
     const sessionID = event.data.sessionID
     const reduction = v2.reduce(data.session_message[sessionID] ?? [], event)
@@ -1006,6 +1010,7 @@ export function createServerSession(
     // }
     if (event.type === "session.execution.started") setData("session_status", sessionID, { type: "busy" })
     if (
+      event.type === "session.execution.completed" ||
       event.type === "session.execution.succeeded" ||
       event.type === "session.execution.failed" ||
       event.type === "session.execution.interrupted"

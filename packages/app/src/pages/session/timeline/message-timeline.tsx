@@ -419,6 +419,7 @@ export function MessageTimeline(props: {
     },
     getScrollElement: () => listRoot() ?? null,
     observeElementOffset: observeElementOffsetReconnectAware,
+    useAnimationFrameWithResizeObserver: true,
     initialOffset: () => (props.shouldAnchorBottom() ? Number.MAX_SAFE_INTEGER : 0),
     initialMeasurementsCache: initialMeasurements,
     estimateSize: () => timelineFallbackItemSize,
@@ -455,16 +456,6 @@ export function MessageTimeline(props: {
     },
   })
   const resizeItem = virtualizer.resizeItem
-  let resizeAnchorScheduled = false
-  const anchorResizedBottom = () => {
-    if (resizeAnchorScheduled || props.hasScrollGesture()) return
-    resizeAnchorScheduled = true
-    queueMicrotask(() => {
-      resizeAnchorScheduled = false
-      if (!props.shouldAnchorBottom() || props.hasScrollGesture()) return
-      virtualizer.scrollToEnd()
-    })
-  }
   virtualizer.resizeItem = (index, size) => {
     const item = virtualizer.measurementsCache[index]
     const previous = item ? (virtualizer.itemSizeCache.get(item.key) ?? item.size) : undefined
@@ -486,7 +477,6 @@ export function MessageTimeline(props: {
       })
     }
     resizeItem(index, size)
-    if (root && props.shouldAnchorBottom()) anchorResizedBottom()
   }
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item) => {
     if (props.shouldAnchorBottom()) return false

@@ -16,6 +16,7 @@ import {
   IssueMatchNotFoundError,
   IssueWatcherProjectNotFoundError,
   IssueWatcherSessionNotFoundError,
+  IssueWatcherWritebackConflictError,
 } from "@opencode-ai/protocol/groups/issue-watcher"
 import { Effect } from "effect"
 import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi"
@@ -261,10 +262,22 @@ export const IssueWatcherHandler = HttpApiBuilder.group(Api, "server.issueWatche
             "IssueWatcher.SourceNotFoundError": sourceError,
             "IssueWatcher.ConnectionNotFoundError": sourceError,
             "IssueProvider.AuthenticationError": sourceError,
+            "IssueProvider.AmbiguousRequestError": sourceError,
             "IssueProvider.InvalidInputError": sourceError,
             "IssueProvider.NotImplementedError": sourceError,
             "IssueProvider.PaginationError": sourceError,
             "IssueProvider.RequestError": sourceError,
+          }),
+        ),
+      )
+      .handle("issueWatcher.failureComment", (ctx) =>
+        service.enqueueFailureComment(ctx.params.sessionID).pipe(
+          Effect.catchTags({
+            "IssueWatcher.ProvenanceNotFoundError": () => provenanceNotFound(ctx.params.sessionID),
+            "IssueWatcher.WritebackNotAvailableError": (error) => new IssueWatcherWritebackConflictError({
+              sessionID: ctx.params.sessionID,
+              message: error.detail,
+            }),
           }),
         ),
       )

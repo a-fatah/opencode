@@ -69,9 +69,27 @@ const JiraIssueTypeStatuses = Schema.Struct({
 })
 const JiraComponent = Schema.Struct({ id: Schema.String, name: Schema.String })
 const JiraField = Schema.Struct({ id: Schema.String, name: Schema.String, custom: Schema.Boolean })
+const JiraComments = Schema.Struct({
+  startAt: Schema.Number,
+  maxResults: Schema.Number,
+  total: Schema.Number,
+  comments: Schema.Array(Schema.Struct({ id: Schema.String, body: Schema.Json })),
+})
+const JiraComment = Schema.Struct({ id: Schema.String })
+const JiraTransitions = Schema.Struct({
+  transitions: Schema.Array(
+    Schema.Struct({ id: Schema.String, name: Schema.String, to: Schema.Struct({ name: Schema.String }) }),
+  ),
+})
+const JiraCurrentStatus = Schema.Struct({ fields: Schema.Struct({ status: Schema.Struct({ name: Schema.String }) }) })
 const Cursor = Schema.Struct({ updatedAt: Schema.Finite, externalID: Schema.String })
 
-export function makeJira(http: HttpClient.HttpClient): IssueProvider.Adapter {
+interface JiraAdapter extends IssueProvider.Adapter {
+  readonly reconcileComment: NonNullable<IssueProvider.Adapter["reconcileComment"]>
+  readonly reconcileTransition: NonNullable<IssueProvider.Adapter["reconcileTransition"]>
+}
+
+export function makeJira(http: HttpClient.HttpClient): JiraAdapter {
   const integrationID = Integration.ID.make("jira")
 
   const site = (inputs: Integration.Inputs) =>
@@ -117,6 +135,38 @@ export function makeJira(http: HttpClient.HttpClient): IssueProvider.Adapter {
         Effect.mapError(() => new IssueProvider.RequestError({ detail: "Jira returned an invalid response" })),
       )
     })
+
+  const request = Effect.fn("Jira.request")(function* (
+    credential: Credential.Key,
+    path: string,
+    body: Schema.Json,
+  ) {
+    const inputs = credential.inputs ?? {}
+    const email = inputs.email?.trim()
+    if (!email) return yield* new IssueProvider.InvalidInputError({ detail: "Jira email is required" })
+    const base = yield* site(inputs)
+    const encoded = yield* HttpClientRequest.post(`${base}${path}`).pipe(
+      HttpClientRequest.acceptJson,
+      HttpClientRequest.basicAuth(email, credential.key),
+      HttpClientRequest.bodyJson(body),
+      Effect.mapError(() => new IssueProvider.InvalidInputError({ detail: "Jira request body is invalid" })),
+    )
+    const response = yield* http.execute(encoded).pipe(
+      Effect.mapError(() => new IssueProvider.AmbiguousRequestError({ detail: "Jira request outcome is unknown" })),
+    )
+    if (response.status === 401 || response.status === 403) {
+      return yield* new IssueProvider.AuthenticationError({ detail: "Jira rejected the email or API token" })
+    }
+    if (response.status === 408 || response.status === 429 || response.status >= 500) {
+      return yield* new IssueProvider.AmbiguousRequestError({
+        detail: `Jira returned HTTP ${response.status}; request outcome is unknown`,
+      })
+    }
+    if (response.status < 200 || response.status >= 300) {
+      return yield* new IssueProvider.RequestError({ detail: `Jira returned HTTP ${response.status}` })
+    }
+    return response
+  })
 
   const normalize = (base: string, issue: typeof JiraIssue.Type, names = issue.names ?? {}) =>
     Schema.decodeUnknownSync(Issue.Info)({
@@ -332,9 +382,98 @@ export function makeJira(http: HttpClient.HttpClient): IssueProvider.Adapter {
         yield* execute(credential, `/rest/api/3/issue/${encodeURIComponent(key)}?fields=*all&expand=names`, JiraIssue),
       )
     }),
-    comment: () => new IssueProvider.NotImplementedError({ operation: "comment" }),
-    transition: () => new IssueProvider.NotImplementedError({ operation: "transition" }),
+    comment: Effect.fn("Jira.comment")(function* (credential, operation) {
+      const issueKey = yield* required(operation.issueKey, "Jira issue key is required")
+      const text = yield* required(operation.text, "Jira comment text is required")
+      yield* required(operation.operationKey, "Comment operation key is required")
+      const marker = yield* required(operation.marker, "Comment operation marker is required")
+      const response = yield* request(credential, `/rest/api/3/issue/${encodeURIComponent(issueKey)}/comment`, {
+        body: {
+          type: "doc",
+          version: 1,
+          content: [
+            { type: "paragraph", content: [{ type: "text", text }] },
+            { type: "paragraph", content: [{ type: "text", text: marker }] },
+          ],
+        },
+      })
+      const result = yield* HttpClientResponse.schemaBodyJson(JiraComment)(response).pipe(
+        Effect.mapError(() => new IssueProvider.AmbiguousRequestError({
+          detail: "Jira accepted the comment but returned an invalid response",
+        })),
+      )
+      return { providerResultID: result.id }
+    }),
+    reconcileComment: Effect.fn("Jira.reconcileComment")(function* (credential, operation) {
+      const issueKey = yield* required(operation.issueKey, "Jira issue key is required")
+      yield* required(operation.operationKey, "Comment operation key is required")
+      const marker = yield* required(operation.marker, "Comment operation marker is required")
+      const first = yield* execute(
+        credential,
+        `/rest/api/3/issue/${encodeURIComponent(issueKey)}/comment?startAt=0&maxResults=100`,
+        JiraComments,
+      )
+      const pageSize = Math.max(1, first.maxResults)
+      const offsets = Array.from(
+        { length: Math.max(0, Math.ceil((first.total - first.startAt - first.comments.length) / pageSize)) },
+        (_, index) => first.startAt + pageSize * (index + 1),
+      )
+      const remaining = yield* Effect.forEach(offsets, (startAt) =>
+        execute(
+          credential,
+          `/rest/api/3/issue/${encodeURIComponent(issueKey)}/comment?startAt=${startAt}&maxResults=100`,
+          JiraComments,
+        ),
+      )
+      const found = [first, ...remaining].flatMap((page) => page.comments)
+        .find((comment) => jiraFieldText(comment.body)?.includes(marker) === true)
+      return found ? { applied: true, providerResultID: found.id } : { applied: false }
+    }),
+    transition: Effect.fn("Jira.transition")(function* (credential, operation) {
+      const issueKey = yield* required(operation.issueKey, "Jira issue key is required")
+      const targetStatus = yield* required(operation.targetStatus, "Jira target status is required")
+      const current = yield* execute(
+        credential,
+        `/rest/api/3/issue/${encodeURIComponent(issueKey)}?fields=status`,
+        JiraCurrentStatus,
+      )
+      if (current.fields.status.name.toLocaleLowerCase() === targetStatus.toLocaleLowerCase()) return {}
+      const available = yield* execute(
+        credential,
+        `/rest/api/3/issue/${encodeURIComponent(issueKey)}/transitions`,
+        JiraTransitions,
+      )
+      const transition = available.transitions.find(
+        (candidate) => candidate.to.name.toLocaleLowerCase() === targetStatus.toLocaleLowerCase(),
+      )
+      if (!transition) {
+        return yield* new IssueProvider.InvalidInputError({
+          detail: `Jira status is not available for transition: ${targetStatus}`,
+        })
+      }
+      yield* request(credential, `/rest/api/3/issue/${encodeURIComponent(issueKey)}/transitions`, {
+        transition: { id: transition.id },
+      })
+      return { providerResultID: transition.id }
+    }),
+    reconcileTransition: Effect.fn("Jira.reconcileTransition")(function* (credential, operation) {
+      const issueKey = yield* required(operation.issueKey, "Jira issue key is required")
+      const targetStatus = yield* required(operation.targetStatus, "Jira target status is required")
+      const issue = yield* execute(
+        credential,
+        `/rest/api/3/issue/${encodeURIComponent(issueKey)}?fields=status`,
+        JiraCurrentStatus,
+      )
+      return { applied: issue.fields.status.name.toLocaleLowerCase() === targetStatus.toLocaleLowerCase() }
+    }),
   }
+}
+
+function required(value: string, detail: string) {
+  const normalized = value.trim()
+  return normalized
+    ? Effect.succeed(normalized)
+    : Effect.fail(new IssueProvider.InvalidInputError({ detail }))
 }
 
 function uniqueOptions<T extends { readonly id: string; readonly name: string }>(options: ReadonlyArray<T>) {

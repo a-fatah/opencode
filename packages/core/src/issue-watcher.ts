@@ -35,9 +35,12 @@ import { IssueWatcherMaterialization } from "./issue-watcher/materialization"
 import { renderPrompt } from "./issue-watcher/prompt"
 import { SessionID } from "@opencode-ai/schema/session-id"
 import { SessionMessage } from "./session/message"
+import { SessionExecutionAttempt } from "./session/execution-attempt"
+import { SessionExecutionAttemptTable } from "./session/sql"
 import { SessionProvenance } from "@opencode-ai/schema/session-provenance"
 import { Project } from "@opencode-ai/schema/project"
 import { IssueWritebackOperationTable, SessionProvenanceTable } from "./issue-watcher/sql"
+import { IssueWatcherWriteback } from "./issue-watcher/writeback"
 
 export const ID = IssueWatcher.ID
 export type ID = IssueWatcher.ID
@@ -176,6 +179,11 @@ export class ProvenanceNotFoundError extends Schema.TaggedErrorClass<ProvenanceN
   { sessionID: SessionID },
 ) {}
 
+export class WritebackNotAvailableError extends Schema.TaggedErrorClass<WritebackNotAvailableError>()(
+  "IssueWatcher.WritebackNotAvailableError",
+  { sessionID: SessionID, detail: Schema.String },
+) {}
+
 export type Error = NotFoundError | ArchivedError | OwnerConflictError
 
 export interface Interface {
@@ -252,6 +260,7 @@ export interface Interface {
   readonly removeIgnore: (id: ID, externalID: string) => Effect.Effect<void, NotFoundError>
   readonly provenanceDetail: (sessionID: SessionID) => Effect.Effect<SessionProvenance.Detail, ProvenanceNotFoundError>
   readonly syncProvenance: (sessionID: SessionID) => Effect.Effect<SessionProvenance.Detail, ProvenanceNotFoundError | SourceNotFoundError | ConnectionNotFoundError | IssueProvider.Error>
+  readonly enqueueFailureComment: (sessionID: SessionID) => Effect.Effect<IssueMatch.WritebackOperation, ProvenanceNotFoundError | WritebackNotAvailableError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/IssueWatcher") {}
@@ -268,6 +277,7 @@ const layer = Layer.effect(
     const projectCatalog = yield* ProjectRoutingCatalog.Service
     const workspaces = yield* WorkspaceProvisioner.Service
     const sessions = yield* SessionV2.Service
+    const writeback = yield* IssueWatcherWriteback.Service
     const decode = Schema.decodeUnknownSync(Info)
     const decodeRun = Schema.decodeUnknownSync(IssueWatcher.Run)
     const decodeMatch = Schema.decodeUnknownSync(IssueMatch.Info)
@@ -771,7 +781,13 @@ const layer = Layer.effect(
       const links = yield* db.select().from(IssueMatchSessionTable)
         .where(eq(IssueMatchSessionTable.match_id, match.id)).all().pipe(Effect.orDie)
       const materialized = yield* db.select().from(IssueMaterializationTable)
-        .where(eq(IssueMaterializationTable.match_id, match.id)).orderBy(desc(IssueMaterializationTable.time_created)).get().pipe(Effect.orDie)
+        .where(and(
+          eq(IssueMaterializationTable.match_id, match.id),
+          eq(IssueMaterializationTable.session_id, sessionID),
+        )).orderBy(desc(IssueMaterializationTable.time_created)).get().pipe(Effect.orDie)
+      const latestExecution = yield* db.select().from(SessionExecutionAttemptTable)
+        .where(eq(SessionExecutionAttemptTable.session_id, sessionID))
+        .orderBy(desc(SessionExecutionAttemptTable.scheduled_at), desc(sql<number>`rowid`)).get().pipe(Effect.orDie)
       const writebacks = yield* db.select().from(IssueWritebackOperationTable)
         .where(eq(IssueWritebackOperationTable.session_id, sessionID)).all().pipe(Effect.orDie)
       return SessionProvenance.Detail.make({
@@ -786,6 +802,7 @@ const layer = Layer.effect(
           externalUrl: provenance.external_url,
           watcherName: provenance.watcher_name,
           ...(provenance.branch ? { branch: provenance.branch } : {}),
+          writeback: provenance.writeback,
           ...(provenance.last_synced_at ? { lastSyncedAt: DateTime.makeUnsafe(provenance.last_synced_at) } : {}),
           timeCreated: DateTime.makeUnsafe(provenance.time_created),
           timeUpdated: DateTime.makeUnsafe(provenance.time_updated),
@@ -824,6 +841,7 @@ const layer = Layer.effect(
           timeCreated: materialized.time_created,
           timeUpdated: materialized.time_updated,
         }) } : {}),
+        ...(latestExecution ? { latestExecution: SessionExecutionAttempt.fromRow(latestExecution) } : {}),
         writebacks: writebacks.map((row) => decodeWriteback({
           id: row.id,
           sessionID: row.session_id,
@@ -1877,7 +1895,15 @@ const layer = Layer.effect(
             last_synced_at: now,
           }).where(eq(SessionProvenanceTable.session_id, sessionID)).run()
         })).pipe(Effect.orDie)
+        yield* writeback.reconcileSession(sessionID)
         return yield* provenanceDetail(sessionID)
+      }),
+      enqueueFailureComment: Effect.fn("IssueWatcher.enqueueFailureComment")(function* (sessionID) {
+        return yield* writeback.enqueueFailureComment(sessionID).pipe(
+          Effect.mapError((error) => error._tag === "IssueWatcherWriteback.NotFoundError"
+            ? new ProvenanceNotFoundError({ sessionID })
+            : new WritebackNotAvailableError({ sessionID, detail: error.detail })),
+        )
       }),
     })
 
@@ -1927,7 +1953,7 @@ const layer = Layer.effect(
 export const node = makeGlobalNode({
   service: Service,
   layer,
-  deps: [Database.node, EventV2.node, GlobalConfig.node, Credential.node, IssueProvider.node, IssueWatcherOwner.node, ProjectRoutingCatalog.node, WorkspaceProvisioner.node, SessionV2.node],
+  deps: [Database.node, EventV2.node, GlobalConfig.node, Credential.node, IssueProvider.node, IssueWatcherOwner.node, ProjectRoutingCatalog.node, WorkspaceProvisioner.node, SessionV2.node, IssueWatcherWriteback.node],
 })
 
 function uniqueMetadataOptions(options: ReadonlyArray<IssueWatcher.MetadataOption>) {

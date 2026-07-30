@@ -43,6 +43,30 @@ export const WritebackOperationID = Schema.String.check(Schema.isStartsWith("iwo
 )
 export type WritebackOperationID = typeof WritebackOperationID.Type
 
+export interface CommentWritebackRequest extends Schema.Schema.Type<typeof CommentWritebackRequest> {}
+export const CommentWritebackRequest = Schema.Struct({
+  type: Schema.Literal("comment"),
+  integrationID: Integration.ID,
+  connectionID: Schema.suspend(() => IssueWatcher.ConnectionID),
+  externalKey: Schema.String,
+  text: Schema.String,
+  marker: Schema.String,
+}).annotate({ identifier: "IssueMatch.CommentWritebackRequest" })
+
+export interface TransitionWritebackRequest extends Schema.Schema.Type<typeof TransitionWritebackRequest> {}
+export const TransitionWritebackRequest = Schema.Struct({
+  type: Schema.Literal("transition"),
+  integrationID: Integration.ID,
+  connectionID: Schema.suspend(() => IssueWatcher.ConnectionID),
+  externalKey: Schema.String,
+  targetStatus: Schema.String,
+}).annotate({ identifier: "IssueMatch.TransitionWritebackRequest" })
+
+export const WritebackRequest = Schema.Union([CommentWritebackRequest, TransitionWritebackRequest])
+  .pipe(Schema.toTaggedUnion("type"))
+  .annotate({ identifier: "IssueMatch.WritebackRequest" })
+export type WritebackRequest = typeof WritebackRequest.Type
+
 const WatcherID = Schema.suspend(() => IssueWatcher.ID)
 
 export interface Info extends Schema.Schema.Type<typeof Info> {}
@@ -137,7 +161,7 @@ export const WritebackOperation = Schema.Struct({
   sessionID: SessionID,
   kind: Schema.Literals(["comment_created", "transition_started", "comment_failed"]),
   triggerID: Schema.String,
-  request: Schema.Json,
+  request: WritebackRequest,
   state: Schema.Literals(["pending", "applying", "applied", "unknown", "failed"]),
   providerResultID: optional(Schema.String),
   attempts: NonNegativeInt,

@@ -8,6 +8,7 @@ import { IssueWatcher } from "./issue-watcher"
 import { Location } from "./location"
 import { DateTimeUtcFromMillis, optional } from "./schema"
 import { SessionID } from "./session-id"
+import { SessionExecutionAttempt } from "./session-execution-attempt"
 
 export interface IssueRef extends Schema.Schema.Type<typeof IssueRef> {}
 export const IssueRef = Schema.Struct({
@@ -37,6 +38,7 @@ export const Info = Schema.Struct({
   externalUrl: Schema.String,
   watcherName: Schema.String,
   branch: optional(Schema.String),
+  writeback: IssueWatcher.WritebackPlan,
   lastSyncedAt: optional(DateTimeUtcFromMillis),
   timeCreated: DateTimeUtcFromMillis,
   timeUpdated: DateTimeUtcFromMillis,
@@ -65,6 +67,7 @@ export const Detail = Schema.Struct({
   workspace: optional(Location.Ref),
   sessions: Schema.Array(IssueMatch.SessionLink),
   materialization: optional(IssueMatch.Materialization),
+  latestExecution: optional(SessionExecutionAttempt.Info),
   writebacks: Schema.Array(IssueMatch.WritebackOperation),
   lastSyncedAt: optional(DateTimeUtcFromMillis),
 }).annotate({ identifier: "SessionProvenance.Detail" })

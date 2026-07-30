@@ -59,6 +59,8 @@ import type {
   IssueWatchersProvenanceDetailOutput,
   IssueWatchersSyncProvenanceInput,
   IssueWatchersSyncProvenanceOutput,
+  IssueWatchersFailureCommentInput,
+  IssueWatchersFailureCommentOutput,
   IssueWatchersEnableInput,
   IssueWatchersEnableOutput,
   LocationGetInput,
@@ -742,6 +744,17 @@ export function make(options: ClientOptions) {
             path: `/api/issue-watcher/sessions/${encodeURIComponent(input.sessionID)}/sync`,
             successStatus: 200,
             declaredStatuses: [404, 400, 401, 502],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      failureComment: (input: IssueWatchersFailureCommentInput, requestOptions?: RequestOptions) =>
+        request<IssueWatchersFailureCommentOutput>(
+          {
+            method: "POST",
+            path: `/api/issue-watcher/sessions/${encodeURIComponent(input.sessionID)}/writeback/failure-comment`,
+            successStatus: 200,
+            declaredStatuses: [404, 409, 401, 400],
             empty: false,
           },
           requestOptions,

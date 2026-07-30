@@ -23,6 +23,11 @@ export class RequestError extends Schema.TaggedErrorClass<RequestError>()("Issue
   detail: Schema.String,
 }) {}
 
+export class AmbiguousRequestError extends Schema.TaggedErrorClass<AmbiguousRequestError>()(
+  "IssueProvider.AmbiguousRequestError",
+  { detail: Schema.String },
+) {}
+
 export class PaginationError extends Schema.TaggedErrorClass<PaginationError>()("IssueProvider.PaginationError", {
   detail: Schema.String,
 }) {}
@@ -32,7 +37,34 @@ export class NotImplementedError extends Schema.TaggedErrorClass<NotImplementedE
   { operation: Schema.String },
 ) {}
 
-export type Error = InvalidInputError | AuthenticationError | RequestError | PaginationError | NotImplementedError
+export type Error =
+  | InvalidInputError
+  | AuthenticationError
+  | RequestError
+  | AmbiguousRequestError
+  | PaginationError
+  | NotImplementedError
+
+export interface CommentOperation {
+  readonly issueKey: string
+  readonly text: string
+  readonly operationKey: string
+  readonly marker: string
+}
+
+export interface TransitionOperation {
+  readonly issueKey: string
+  readonly targetStatus: string
+}
+
+export interface ReconciliationResult {
+  readonly applied: boolean
+  readonly providerResultID?: string
+}
+
+export interface MutationResult {
+  readonly providerResultID?: string
+}
 
 export interface SearchResult {
   readonly issues: ReadonlyArray<Issue.Info>
@@ -58,8 +90,22 @@ export interface Adapter {
     readonly page?: string
   }) => Effect.Effect<SearchResult, Error>
   readonly get: (credential: Credential.Key, key: string) => Effect.Effect<Issue.Info, Error>
-  readonly comment: () => Effect.Effect<never, NotImplementedError>
-  readonly transition: () => Effect.Effect<never, NotImplementedError>
+  readonly comment: (
+    credential: Credential.Key,
+    operation: CommentOperation,
+  ) => Effect.Effect<MutationResult, InvalidInputError | AuthenticationError | RequestError | AmbiguousRequestError | NotImplementedError>
+  readonly reconcileComment?: (
+    credential: Credential.Key,
+    operation: CommentOperation,
+  ) => Effect.Effect<ReconciliationResult, InvalidInputError | AuthenticationError | RequestError>
+  readonly transition: (
+    credential: Credential.Key,
+    operation: TransitionOperation,
+  ) => Effect.Effect<MutationResult, InvalidInputError | AuthenticationError | RequestError | AmbiguousRequestError | NotImplementedError>
+  readonly reconcileTransition?: (
+    credential: Credential.Key,
+    operation: TransitionOperation,
+  ) => Effect.Effect<ReconciliationResult, InvalidInputError | AuthenticationError | RequestError>
 }
 
 export interface Interface {

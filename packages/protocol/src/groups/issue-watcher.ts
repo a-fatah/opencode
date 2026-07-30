@@ -42,6 +42,12 @@ export class IssueWatcherSessionNotFoundError extends Schema.TaggedErrorClass<Is
   { httpApiStatus: 404 },
 ) {}
 
+export class IssueWatcherWritebackConflictError extends Schema.TaggedErrorClass<IssueWatcherWritebackConflictError>()(
+  "IssueWatcherWritebackConflictError",
+  { sessionID: Schema.String, message: Schema.String },
+  { httpApiStatus: 409 },
+) {}
+
 const MatchErrors = [IssueMatchNotFoundError, IssueMatchConflictError] as const
 const MaterializationErrors = [...MatchErrors, IssueWatcherProjectNotFoundError] as const
 
@@ -331,6 +337,13 @@ export const IssueWatcherGroup = HttpApiGroup.make("server.issueWatcher")
       success: SessionProvenance.Detail,
       error: [IssueWatcherSessionNotFoundError, ...SourceErrors],
     }).annotateMerge(OpenApi.annotations({ identifier: "v2.issueWatcher.session.sync", summary: "Sync session issue provenance" })),
+  )
+  .add(
+    HttpApiEndpoint.post("issueWatcher.failureComment", "/api/issue-watcher/sessions/:sessionID/writeback/failure-comment", {
+      params: { sessionID: SessionID },
+      success: IssueMatch.WritebackOperation,
+      error: [IssueWatcherSessionNotFoundError, IssueWatcherWritebackConflictError],
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.issueWatcher.session.writeback.failureComment", summary: "Enqueue a session failure comment" })),
   )
   .add(
     HttpApiEndpoint.post("issueWatcher.enable", "/api/issue-watcher/watchers/:watcherID/enable", {

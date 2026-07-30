@@ -120,6 +120,17 @@ export type IssueWatcherSessionNotFoundError = {
 export const isIssueWatcherSessionNotFoundError = (value: unknown): value is IssueWatcherSessionNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "IssueWatcherSessionNotFoundError"
 
+export type IssueWatcherWritebackConflictError = {
+  readonly _tag: "IssueWatcherWritebackConflictError"
+  readonly sessionID: string
+  readonly message: string
+}
+export const isIssueWatcherWritebackConflictError = (value: unknown): value is IssueWatcherWritebackConflictError =>
+  typeof value === "object" &&
+  value !== null &&
+  "_tag" in value &&
+  value["_tag"] === "IssueWatcherWritebackConflictError"
+
 export type SessionNotFoundError = {
   readonly _tag: "SessionNotFoundError"
   readonly sessionID: string
@@ -2155,6 +2166,11 @@ export type IssueWatchersProvenanceDetailOutput = {
     readonly externalUrl: string
     readonly watcherName: string
     readonly branch?: string
+    readonly writeback: {
+      readonly comment?: string
+      readonly transitionOnStart?: string
+      readonly commentOnFailure?: string
+    }
     readonly lastSyncedAt?: number
     readonly timeCreated: number
     readonly timeUpdated: number
@@ -2240,12 +2256,40 @@ export type IssueWatchersProvenanceDetailOutput = {
     readonly timeCreated: number
     readonly timeUpdated: number
   }
+  readonly latestExecution?: {
+    readonly id: string
+    readonly sessionID: string
+    readonly messageID: string
+    readonly ownerEpoch: string
+    readonly status: "scheduled" | "running" | "completed" | "failed" | "interrupted" | "superseded" | "handoff_unknown"
+    readonly supersededByAttemptID?: string
+    readonly failure?: { readonly type: string; readonly message: string; readonly retryable?: boolean }
+    readonly interruption?: { readonly reason: "user" | "shutdown" | "superseded"; readonly detail?: string }
+    readonly timeScheduled: number
+    readonly timeStarted?: number
+    readonly timeCompleted?: number
+  }
   readonly writebacks: ReadonlyArray<{
     readonly id: string
     readonly sessionID: string
     readonly kind: "comment_created" | "transition_started" | "comment_failed"
     readonly triggerID: string
-    readonly request: JsonValue
+    readonly request:
+      | {
+          readonly type: "comment"
+          readonly integrationID: string
+          readonly connectionID: string
+          readonly externalKey: string
+          readonly text: string
+          readonly marker: string
+        }
+      | {
+          readonly type: "transition"
+          readonly integrationID: string
+          readonly connectionID: string
+          readonly externalKey: string
+          readonly targetStatus: string
+        }
     readonly state: "pending" | "applying" | "applied" | "unknown" | "failed"
     readonly providerResultID?: string
     readonly attempts: number
@@ -2270,6 +2314,11 @@ export type IssueWatchersSyncProvenanceOutput = {
     readonly externalUrl: string
     readonly watcherName: string
     readonly branch?: string
+    readonly writeback: {
+      readonly comment?: string
+      readonly transitionOnStart?: string
+      readonly commentOnFailure?: string
+    }
     readonly lastSyncedAt?: number
     readonly timeCreated: number
     readonly timeUpdated: number
@@ -2355,12 +2404,40 @@ export type IssueWatchersSyncProvenanceOutput = {
     readonly timeCreated: number
     readonly timeUpdated: number
   }
+  readonly latestExecution?: {
+    readonly id: string
+    readonly sessionID: string
+    readonly messageID: string
+    readonly ownerEpoch: string
+    readonly status: "scheduled" | "running" | "completed" | "failed" | "interrupted" | "superseded" | "handoff_unknown"
+    readonly supersededByAttemptID?: string
+    readonly failure?: { readonly type: string; readonly message: string; readonly retryable?: boolean }
+    readonly interruption?: { readonly reason: "user" | "shutdown" | "superseded"; readonly detail?: string }
+    readonly timeScheduled: number
+    readonly timeStarted?: number
+    readonly timeCompleted?: number
+  }
   readonly writebacks: ReadonlyArray<{
     readonly id: string
     readonly sessionID: string
     readonly kind: "comment_created" | "transition_started" | "comment_failed"
     readonly triggerID: string
-    readonly request: JsonValue
+    readonly request:
+      | {
+          readonly type: "comment"
+          readonly integrationID: string
+          readonly connectionID: string
+          readonly externalKey: string
+          readonly text: string
+          readonly marker: string
+        }
+      | {
+          readonly type: "transition"
+          readonly integrationID: string
+          readonly connectionID: string
+          readonly externalKey: string
+          readonly targetStatus: string
+        }
     readonly state: "pending" | "applying" | "applied" | "unknown" | "failed"
     readonly providerResultID?: string
     readonly attempts: number
@@ -2369,6 +2446,37 @@ export type IssueWatchersSyncProvenanceOutput = {
     readonly timeUpdated: number
   }>
   readonly lastSyncedAt?: number
+}
+
+export type IssueWatchersFailureCommentInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type IssueWatchersFailureCommentOutput = {
+  readonly id: string
+  readonly sessionID: string
+  readonly kind: "comment_created" | "transition_started" | "comment_failed"
+  readonly triggerID: string
+  readonly request:
+    | {
+        readonly type: "comment"
+        readonly integrationID: string
+        readonly connectionID: string
+        readonly externalKey: string
+        readonly text: string
+        readonly marker: string
+      }
+    | {
+        readonly type: "transition"
+        readonly integrationID: string
+        readonly connectionID: string
+        readonly externalKey: string
+        readonly targetStatus: string
+      }
+  readonly state: "pending" | "applying" | "applied" | "unknown" | "failed"
+  readonly providerResultID?: string
+  readonly attempts: number
+  readonly error?: string
+  readonly timeCreated: number
+  readonly timeUpdated: number
 }
 
 export type IssueWatchersEnableInput = {

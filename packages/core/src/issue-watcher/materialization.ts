@@ -142,10 +142,14 @@ export const make = Effect.fn("IssueWatcherMaterialization.make")(function* (inp
     const watcher = match
       ? yield* input.db.select().from(IssueWatcherTable).where(eq(IssueWatcherTable.id, match.watcher_id)).get().pipe(Effect.orDie)
       : undefined
-    if (!match || !watcher) return yield* Effect.die(`Issue match not found: ${initial.match_id}`)
+    const observation = yield* input.db.select().from(IssueMatchObservationTable)
+      .where(eq(IssueMatchObservationTable.id, initial.baseline_observation_id)).get().pipe(Effect.orDie)
+    if (!match || !watcher || !observation) return yield* Effect.die(`Issue match not found: ${initial.match_id}`)
 
     const project = yield* input.projects.resolve(Project.ID.make(initial.project_id), initial.source_directory ?? undefined)
-    const projectSnapshot = (yield* input.projects.list()).find((item) => item.projectID === initial.project_id)
+    const legacyProjectSnapshot = initial.prompt === null
+      ? (yield* input.projects.list()).find((item) => item.projectID === initial.project_id)
+      : undefined
     const secondary = !(yield* input.db.select({ id: IssueSessionClaimTable.materialization_id })
       .from(IssueSessionClaimTable).where(eq(IssueSessionClaimTable.materialization_id, initial.id)).get().pipe(Effect.orDie))
     const lease = initial.workspace_lease ?? (yield* input.workspaces.reserve({
@@ -177,7 +181,7 @@ export const make = Effect.fn("IssueWatcherMaterialization.make")(function* (inp
     const admitted = yield* input.sessions.prompt({
       id: SessionMessage.ID.make(initial.message_id),
       sessionID: SessionID.make(initial.session_id),
-      prompt: { text: renderPrompt(match.payload, projectSnapshot, watcher.action.promptTemplate) },
+      prompt: { text: initial.prompt ?? renderPrompt(observation.payload, legacyProjectSnapshot, initial.action.promptTemplate) },
       resume: false,
     })
     if (admitted.sessionID !== initial.session_id || admitted.id !== initial.message_id)
@@ -201,6 +205,17 @@ export const make = Effect.fn("IssueWatcherMaterialization.make")(function* (inp
         external_url: match.external_url,
         watcher_name: watcher.name,
         branch: lease.branch,
+        writeback: {
+          ...(initial.action.writeback.comment
+            ? { comment: `OpenCode started work on ${observation.payload.key}: ${observation.payload.title}` }
+            : {}),
+          ...(initial.action.writeback.transitionOnStart
+            ? { transitionOnStart: initial.action.writeback.transitionOnStart }
+            : {}),
+          ...(initial.action.writeback.commentOnFailure
+            ? { commentOnFailure: `OpenCode could not complete work on ${observation.payload.key}.` }
+            : {}),
+        },
       }).onConflictDoNothing().run()
       if (!secondary) {
         yield* tx.update(IssueSessionClaimTable).set({ primary_session_id: initial.session_id })
@@ -293,6 +308,7 @@ export const make = Effect.fn("IssueWatcherMaterialization.make")(function* (inp
         (previous.state !== "failed" || previous.error?.startsWith("retryable:"))
       ) yield* input.workspaces.cleanup(previous.workspace_lease).pipe(Effect.orDie)
     }
+    const projectSnapshots = yield* input.projects.list()
     const staged = yield* input.db.transaction((tx) => Effect.gen(function* () {
       const match = yield* tx.select().from(IssueMatchTable).where(eq(IssueMatchTable.id, request.matchID)).get()
       if (!match) return undefined
@@ -369,6 +385,12 @@ export const make = Effect.fn("IssueWatcherMaterialization.make")(function* (inp
         project_id: request.projectID ?? match.project_id!,
         source_directory: request.directory ?? terminal?.source_directory,
         workspace: request.workspace ?? watcher.routing.workspace,
+        action: watcher.action,
+        prompt: renderPrompt(
+          observation.payload,
+          projectSnapshots.find((item) => item.projectID === (request.projectID ?? match.project_id)),
+          watcher.action.promptTemplate,
+        ),
         baseline_observation_id: observation.id,
         state: "pending",
         session_id: sessionID,

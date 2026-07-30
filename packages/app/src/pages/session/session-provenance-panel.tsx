@@ -29,6 +29,9 @@ export function SessionProvenancePanel(props: {
     enabled: provenanceQueryEnabled(props.provenance),
     queryFn: () => props.serverSDK.nextApi.issueWatchers.provenanceDetail({ sessionID: props.sessionID }),
     retry: false,
+    refetchInterval: (query) => query.state.data?.writebacks.some((item) => item.state === "pending" || item.state === "applying")
+      ? 1_000
+      : false,
   }))
   const location = createMemo(() => (detail.data ? provenanceLocation(detail.data) : undefined))
   const provenance = createMemo(() => props.provenance?.type === "issue" ? props.provenance : undefined)
@@ -47,9 +50,42 @@ export function SessionProvenancePanel(props: {
         description: error instanceof Error ? error.message : String(error),
       }),
   }))
+  const failureComment = useMutation(() => ({
+    mutationFn: () => props.serverSDK.nextApi.issueWatchers.failureComment({ sessionID: props.sessionID }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: key() }),
+    onError: (error) =>
+      showToast({
+        variant: "error",
+        title: "Failure comment could not be queued",
+        description: error instanceof Error ? error.message : String(error),
+      }),
+  }))
+  const retryRun = useMutation(() => ({
+    mutationFn: () => props.serverSDK.nextApi.sessions.prompt({
+      sessionID: props.sessionID,
+      id: `msg_retry_${detail.data?.latestExecution?.id}`,
+      prompt: { text: "Retry this issue task after reviewing the previous failure." },
+    }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: key() }),
+    onError: (error) =>
+      showToast({
+        variant: "error",
+        title: "Run retry failed",
+        description: error instanceof Error ? error.message : String(error),
+      }),
+  }))
   const unsubscribe = props.serverSDK.event.listen(({ details }) => {
-    const event = details as unknown as { type: string; properties?: { sessionID?: string } }
-    if (event.type !== "issue_watcher.session.materialized" || event.properties?.sessionID !== props.sessionID) return
+    const event = details.current
+      ? { type: details.current.type, data: "data" in details.current ? details.current.data : undefined }
+      : { type: details.type, data: details.properties as { sessionID?: string } }
+    if (![
+      "issue_watcher.session.materialized",
+      "session.execution.started",
+      "session.execution.completed",
+      "session.execution.failed",
+      "session.execution.interrupted",
+      "session.execution.superseded",
+    ].includes(event.type) || !(event.data && "sessionID" in event.data) || event.data.sessionID !== props.sessionID) return
     void queryClient.invalidateQueries({ queryKey: key() })
   })
   onCleanup(unsubscribe)
@@ -113,7 +149,43 @@ export function SessionProvenancePanel(props: {
                   <IssueField label="Last sync">{formatSyncTime(provenanceLastSync(detail.data!))}</IssueField>
                 </div>
                 <div class="mt-3">
-                  <p class="text-11-medium text-v2-text-text-muted">Writeback checklist</p>
+                  <div class="flex items-center justify-between gap-2">
+                    <p class="text-11-medium text-v2-text-text-muted">Writeback checklist</p>
+                    <Show when={detail.data!.latestExecution?.status === "failed"}>
+                      <div class="flex items-center gap-1">
+                        <ButtonV2 variant="ghost" size="small" disabled={retryRun.isPending} onClick={() => retryRun.mutate()}>
+                          {retryRun.isPending ? "Retrying..." : "Retry run"}
+                        </ButtonV2>
+                        <ButtonV2
+                          variant="ghost"
+                          size="small"
+                          disabled={failureComment.isPending || detail.data!.writebacks.some((item) =>
+                            item.kind === "comment_failed" && item.triggerID === detail.data!.latestExecution?.id && item.state !== "failed"
+                          )}
+                          onClick={() => failureComment.mutate()}
+                        >
+                          {failureComment.isPending ? "Queueing..." : "Post failure comment"}
+                        </ButtonV2>
+                      </div>
+                    </Show>
+                  </div>
+                  <Show when={detail.data!.latestExecution?.status === "failed"}>
+                    <div class="mt-2 rounded-md border border-v2-border-border-base bg-v2-background-bg-surface p-2">
+                      <p class="text-12-medium text-v2-text-text-strong">Run failed</p>
+                      <p class="mt-1 text-11-regular text-v2-text-text-muted">
+                        {detail.data!.latestExecution?.failure?.message ?? "See the session transcript for failure details."} Provider execution is never retried automatically.
+                      </p>
+                    </div>
+                  </Show>
+                  <Show when={detail.data!.provenance.writeback.comment && !detail.data!.writebacks.some((item) => item.kind === "comment_created")}>
+                    <p class="mt-1 text-12-regular text-v2-text-text-muted">Start comment: Not triggered</p>
+                  </Show>
+                  <Show when={detail.data!.provenance.writeback.transitionOnStart && !detail.data!.writebacks.some((item) => item.kind === "transition_started")}>
+                    <p class="mt-1 text-12-regular text-v2-text-text-muted">Start transition: Not triggered</p>
+                  </Show>
+                  <Show when={detail.data!.provenance.writeback.commentOnFailure && !detail.data!.writebacks.some((item) => item.kind === "comment_failed")}>
+                    <p class="mt-1 text-12-regular text-v2-text-text-muted">Failure comment: Not requested</p>
+                  </Show>
                   <Show when={detail.data!.writebacks.length} fallback={<p class="mt-1 text-12-regular text-v2-text-text-muted">No writeback</p>}>
                     <ul class="mt-1 flex flex-col gap-1.5">
                       <For each={detail.data!.writebacks}>
@@ -124,8 +196,11 @@ export function SessionProvenancePanel(props: {
                               <span aria-hidden="true" class="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border border-v2-border-border-base text-10-medium">
                                 {item.state === "applied" ? "x" : ""}
                               </span>
-                              <span class="min-w-0 flex-1">{entry.label}</span>
-                              <span class="shrink-0 text-v2-text-text-muted">{entry.status}</span>
+                               <span class="min-w-0 flex-1">
+                                 <span>{entry.label}</span>
+                                 <Show when={item.error}><span class="mt-0.5 block text-11-regular text-v2-text-text-danger">{item.error}</span></Show>
+                               </span>
+                               <span class="shrink-0 text-v2-text-text-muted">{entry.status}</span>
                             </li>
                           )
                         }}

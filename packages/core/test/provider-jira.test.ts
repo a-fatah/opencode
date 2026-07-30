@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { Credential } from "@opencode-ai/schema/credential"
 import { Effect, Option, Schema } from "effect"
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { makeJira } from "@opencode-ai/core/issue-watcher/provider-jira"
 import { IssueProvider } from "@opencode-ai/core/issue-watcher/provider"
 
@@ -53,6 +53,18 @@ const fakeHttp = (respond: (request: HttpClientRequest.HttpClientRequest) => Res
 
 const url = (request: HttpClientRequest.HttpClientRequest) =>
   Option.getOrElse(HttpClientRequest.toUrl(request), () => new URL(request.url))
+
+const body = (request: HttpClientRequest.HttpClientRequest) => {
+  if (request.body._tag !== "Uint8Array") throw new Error(`Unexpected request body: ${request.body._tag}`)
+  return Schema.decodeUnknownSync(Schema.Json)(JSON.parse(new TextDecoder().decode(request.body.body)))
+}
+
+const commentOperation = {
+  issueKey: "ENG/42",
+  text: "Implemented in build 123.",
+  operationKey: "comment:run-123",
+  marker: "[opencode:comment:run-123]",
+}
 
 describe("Jira issue provider", () => {
   test("normalizes canonical tenant identity and rejects malformed structured inputs", async () => {
@@ -330,6 +342,197 @@ describe("Jira issue provider", () => {
       updatedAt: Date.parse("2026-07-29T12:34:56.789Z"),
     })
     expect(issue.raw).toEqual(response)
+  })
+
+  test("posts Jira comments as ADF with deterministic operation metadata", async () => {
+    const http = fakeHttp(() => Response.json({ id: "comment-123" }, { status: 201 }))
+    expect(await Effect.runPromise(makeJira(http.client).comment(credential(), commentOperation))).toEqual({
+      providerResultID: "comment-123",
+    })
+
+    expect(http.requests).toHaveLength(1)
+    expect(http.requests[0]!.method).toBe("POST")
+    expect(url(http.requests[0]!).pathname).toBe("/rest/api/3/issue/ENG%2F42/comment")
+    expect(http.requests[0]!.headers.authorization).toBe(`Basic ${btoa("user@example.com:api-token")}`)
+    expect(http.requests[0]!.headers.accept).toBe("application/json")
+    expect(http.requests[0]!.headers["content-type"]).toBe("application/json")
+    expect(body(http.requests[0]!)).toEqual({
+      body: {
+        type: "doc",
+        version: 1,
+        content: [
+          { type: "paragraph", content: [{ type: "text", text: "Implemented in build 123." }] },
+          { type: "paragraph", content: [{ type: "text", text: "[opencode:comment:run-123]" }] },
+        ],
+      },
+    })
+  })
+
+  test("treats an invalid successful comment response as ambiguous", async () => {
+    const error = await Effect.runPromise(
+      makeJira(fakeHttp(() => new Response(null, { status: 201 })).client)
+        .comment(credential(), commentOperation)
+        .pipe(Effect.flip),
+    )
+
+    expect(error).toBeInstanceOf(IssueProvider.AmbiguousRequestError)
+  })
+
+  test("reconciles comments by searching all Jira comment pages for the marker", async () => {
+    const http = fakeHttp((request) => {
+      const startAt = Number(url(request).searchParams.get("startAt"))
+      return Response.json({
+        startAt,
+        maxResults: 100,
+        total: 101,
+        comments:
+          startAt === 0
+            ? [{ id: "1", body: { type: "doc", version: 1, content: [{ type: "paragraph", content: [] }] } }]
+            : [
+                {
+                  id: "101",
+                  body: {
+                    type: "doc",
+                    version: 1,
+                    content: [
+                      { type: "paragraph", content: [{ type: "text", text: "[opencode:comment:run-123]" }] },
+                    ],
+                  },
+                },
+              ],
+      })
+    })
+    const result = await Effect.runPromise(makeJira(http.client).reconcileComment(credential(), commentOperation))
+
+    expect(result).toEqual({ applied: true, providerResultID: "101" })
+    expect(http.requests.map((request) => url(request).searchParams.get("startAt"))).toEqual(["0", "100"])
+    expect(http.requests.every((request) => request.method === "GET")).toBe(true)
+  })
+
+  test("uses Jira's effective comment page size during reconciliation", async () => {
+    const http = fakeHttp((request) => {
+      const startAt = Number(url(request).searchParams.get("startAt"))
+      return Response.json({
+        startAt,
+        maxResults: 50,
+        total: 51,
+        comments: startAt === 0
+          ? [{ id: "1", body: {} }]
+          : [{ id: "51", body: { type: "doc", version: 1, content: [{ type: "paragraph", content: [{ type: "text", text: commentOperation.marker }] }] } }],
+      })
+    })
+    const result = await Effect.runPromise(makeJira(http.client).reconcileComment(credential(), commentOperation))
+
+    expect(result).toEqual({ applied: true, providerResultID: "51" })
+    expect(http.requests.map((request) => url(request).searchParams.get("startAt"))).toEqual(["0", "50"])
+  })
+
+  test("reports a comment as unapplied when its marker is absent", async () => {
+    const result = await Effect.runPromise(
+      makeJira(
+        fakeHttp(() => Response.json({ startAt: 0, maxResults: 100, total: 1, comments: [{ id: "1", body: {} }] }))
+          .client,
+      ).reconcileComment(credential(), commentOperation),
+    )
+
+    expect(result).toEqual({ applied: false })
+  })
+
+  test("resolves and posts the available Jira transition for the target status", async () => {
+    const http = fakeHttp((request) =>
+      url(request).searchParams.get("fields") === "status"
+        ? Response.json({ fields: { status: { name: "Open" } } })
+        : request.method === "GET"
+        ? Response.json({
+            transitions: [
+              { id: "11", name: "Start progress", to: { name: "In Progress" } },
+              { id: "31", name: "Complete", to: { name: "Done" } },
+            ],
+          })
+        : new Response(null, { status: 204 }),
+    )
+    expect(await Effect.runPromise(
+      makeJira(http.client).transition(credential(), { issueKey: "ENG/42", targetStatus: "done" }),
+    )).toEqual({ providerResultID: "31" })
+
+    expect(http.requests.map((request) => request.method)).toEqual(["GET", "GET", "POST"])
+    expect(http.requests.map((request) => url(request).pathname)).toEqual([
+      "/rest/api/3/issue/ENG%2F42",
+      "/rest/api/3/issue/ENG%2F42/transitions",
+      "/rest/api/3/issue/ENG%2F42/transitions",
+    ])
+    expect(body(http.requests[2]!)).toEqual({ transition: { id: "31" } })
+    expect(http.requests[2]!.headers.authorization).toBe(`Basic ${btoa("user@example.com:api-token")}`)
+  })
+
+  test("treats unavailable transitions as definitive invalid input", async () => {
+    const error = await Effect.runPromise(
+      makeJira(fakeHttp((request) => url(request).searchParams.get("fields") === "status"
+        ? Response.json({ fields: { status: { name: "Open" } } })
+        : Response.json({ transitions: [] })).client)
+        .transition(credential(), { issueKey: "ENG-42", targetStatus: "Done" })
+        .pipe(Effect.flip),
+    )
+
+    expect(error).toBeInstanceOf(IssueProvider.InvalidInputError)
+  })
+
+  test("reconciles transitions from the current issue status", async () => {
+    const http = fakeHttp(() => Response.json({ fields: { status: { name: "DONE" } } }))
+    const adapter = makeJira(http.client)
+
+    expect(
+      await Effect.runPromise(
+        adapter.reconcileTransition(credential(), { issueKey: "ENG/42", targetStatus: "Done" }),
+      ),
+    ).toEqual({ applied: true })
+    expect(url(http.requests[0]!).pathname).toBe("/rest/api/3/issue/ENG%2F42")
+    expect(url(http.requests[0]!).searchParams.get("fields")).toBe("status")
+  })
+
+  test("distinguishes definitive mutation failures from unknown outcomes", async () => {
+    const unauthorized = makeJira(fakeHttp(() => new Response(null, { status: 401 })).client)
+    const rejected = makeJira(fakeHttp(() => new Response(null, { status: 400 })).client)
+    const unavailable = makeJira(fakeHttp(() => new Response(null, { status: 503 })).client)
+    const timedOut = makeJira(fakeHttp(() => new Response(null, { status: 408 })).client)
+    const transport = HttpClient.make((request) =>
+      Effect.fail(
+        new HttpClientError.HttpClientError({
+          reason: new HttpClientError.TransportError({ request, description: "connection reset" }),
+        }),
+      ),
+    )
+
+    expect(
+      await Effect.runPromise(unauthorized.comment(credential(), commentOperation).pipe(Effect.flip)),
+    ).toBeInstanceOf(IssueProvider.AuthenticationError)
+    expect(await Effect.runPromise(rejected.comment(credential(), commentOperation).pipe(Effect.flip))).toBeInstanceOf(
+      IssueProvider.RequestError,
+    )
+    expect(
+      await Effect.runPromise(unavailable.comment(credential(), commentOperation).pipe(Effect.flip)),
+    ).toBeInstanceOf(IssueProvider.AmbiguousRequestError)
+    expect(
+      await Effect.runPromise(timedOut.comment(credential(), commentOperation).pipe(Effect.flip)),
+    ).toBeInstanceOf(IssueProvider.AmbiguousRequestError)
+    expect(
+      await Effect.runPromise(makeJira(transport).comment(credential(), commentOperation).pipe(Effect.flip)),
+    ).toBeInstanceOf(IssueProvider.AmbiguousRequestError)
+  })
+
+  test("rejects incomplete mutation operations before making requests", async () => {
+    const http = fakeHttp(() => Response.json({ id: "comment-123" }, { status: 201 }))
+    const adapter = makeJira(http.client)
+    const commentError = await Effect.runPromise(
+      adapter.comment(credential(), { ...commentOperation, marker: " " }).pipe(Effect.flip),
+    )
+    const transitionError = await Effect.runPromise(
+      adapter.transition(credential(), { issueKey: "ENG-42", targetStatus: " " }).pipe(Effect.flip),
+    )
+
+    expect(commentError).toBeInstanceOf(IssueProvider.InvalidInputError)
+    expect(transitionError).toBeInstanceOf(IssueProvider.InvalidInputError)
+    expect(http.requests).toHaveLength(0)
   })
 
   test("extracts named custom fields from search metadata without relying on tenant field IDs", async () => {

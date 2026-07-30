@@ -50,6 +50,9 @@ export const migrations = (
     import("./migration/20260730094236_issue_metadata_snapshot"),
     import("./migration/20260730100139_issue_metadata_coordination"),
     import("./migration/20260730110000_implicit_local_provisioned_worktrees"),
+    import("./migration/20260730113738_issue_watcher_writeback_snapshot"),
     import("./migration/20260730113801_issue_materialization_source_directory"),
+    import("./migration/20260730120204_issue_materialization_action"),
+    import("./migration/20260730120529_issue_materialization_prompt"),
   ])
 ).map((module) => module.default) satisfies DatabaseMigration.Migration[]

@@ -362,12 +362,19 @@ const Endpoint1_31 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint
     Effect.mapError(mapClientError),
   )
 
-type Endpoint1_32Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.enable"]>[0]
-type Endpoint1_32Input = {
-  readonly watcherID: Endpoint1_32Request["params"]["watcherID"]
-  readonly enabled: Endpoint1_32Request["payload"]["enabled"]
-}
+type Endpoint1_32Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.failureComment"]>[0]
+type Endpoint1_32Input = { readonly sessionID: Endpoint1_32Request["params"]["sessionID"] }
 const Endpoint1_32 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_32Input) =>
+  raw["issueWatcher.failureComment"]({ params: { sessionID: input["sessionID"] } }).pipe(
+    Effect.mapError(mapClientError),
+  )
+
+type Endpoint1_33Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.enable"]>[0]
+type Endpoint1_33Input = {
+  readonly watcherID: Endpoint1_33Request["params"]["watcherID"]
+  readonly enabled: Endpoint1_33Request["payload"]["enabled"]
+}
+const Endpoint1_33 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_33Input) =>
   raw["issueWatcher.enable"]({
     params: { watcherID: input["watcherID"] },
     payload: { enabled: input["enabled"] },
@@ -406,7 +413,8 @@ const adaptGroup1 = (raw: RawClient["server.issueWatcher"]) => ({
   removeIgnore: Endpoint1_29(raw),
   provenanceDetail: Endpoint1_30(raw),
   syncProvenance: Endpoint1_31(raw),
-  enable: Endpoint1_32(raw),
+  failureComment: Endpoint1_32(raw),
+  enable: Endpoint1_33(raw),
 })
 
 type Endpoint2_0Request = Parameters<RawClient["server.location"]["location.get"]>[0]

@@ -4,7 +4,7 @@ import { IssueWatcherGroup } from "../src/groups/issue-watcher"
 
 const spec = OpenApi.fromApi(HttpApi.make("test").add(IssueWatcherGroup))
 
-describe("issue watcher Slice 8 contracts", () => {
+describe("issue watcher contracts", () => {
   test("exposes all location-free action routes", () => {
     expect(Object.values(IssueWatcherGroup.endpoints).map((endpoint) => [endpoint.method, endpoint.path])).toEqual(
       expect.arrayContaining([
@@ -20,6 +20,7 @@ describe("issue watcher Slice 8 contracts", () => {
         ["DELETE", "/api/issue-watcher/watchers/:watcherID/ignore/:externalID"],
         ["GET", "/api/issue-watcher/sessions/:sessionID"],
         ["POST", "/api/issue-watcher/sessions/:sessionID/sync"],
+        ["POST", "/api/issue-watcher/sessions/:sessionID/writeback/failure-comment"],
       ]),
     )
     expect(Object.values(IssueWatcherGroup.endpoints).every((endpoint) => endpoint.middlewares.size === 0)).toBeTrue()
@@ -33,5 +34,7 @@ describe("issue watcher Slice 8 contracts", () => {
     expect(spec.components.schemas.IssueMatchNotFoundError).toBeDefined()
     expect(spec.components.schemas.IssueMatchConflictError).toBeDefined()
     expect(spec.components.schemas.IssueWatcherSessionNotFoundError).toBeDefined()
+    expect(spec.components.schemas["IssueMatch.WritebackOperation"]).toBeDefined()
+    expect(spec.components.schemas.IssueWatcherWritebackConflictError).toBeDefined()
   })
 })

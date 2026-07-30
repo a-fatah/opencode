@@ -19,7 +19,7 @@ export type Info = SessionExecutionAttempt.Info
 export const Interruption = SessionExecutionAttempt.Interruption
 export type Interruption = SessionExecutionAttempt.Interruption
 
-const fromRow = (row: typeof SessionExecutionAttemptTable.$inferSelect) =>
+export const fromRow = (row: typeof SessionExecutionAttemptTable.$inferSelect) =>
   SessionExecutionAttempt.Info.make({
     id: row.id,
     sessionID: row.session_id,

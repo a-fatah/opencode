@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "d1503447-8cef-4db5-94d0-dd017eeee866",
+  "id": "60f88ad2-adad-4f98-ab01-db2346c35209",
   "prevIds": [
-    "650c548f-fcba-4ac6-85c3-149c40dfa744"
+    "d1503447-8cef-4db5-94d0-dd017eeee866"
   ],
   "ddl": [
     {
@@ -1100,6 +1100,26 @@
     },
     {
       "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'{\"mode\":\"inbox\",\"promptTemplate\":\"{{issue.key}} {{issue.title}}\",\"writeback\":{\"comment\":false,\"commentOnFailure\":false}}'",
+      "generated": null,
+      "name": "action",
+      "entityType": "columns",
+      "table": "issue_materialization"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "prompt",
+      "entityType": "columns",
+      "table": "issue_materialization"
+    },
+    {
+      "type": "text",
       "notNull": false,
       "autoincrement": false,
       "default": null,
@@ -2005,6 +2025,16 @@
       "default": null,
       "generated": null,
       "name": "branch",
+      "entityType": "columns",
+      "table": "session_provenance"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'{}'",
+      "generated": null,
+      "name": "writeback",
       "entityType": "columns",
       "table": "session_provenance"
     },

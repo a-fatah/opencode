@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { adaptServerEvent, coalesceServerEvents, enqueueServerEvent, resumeStreamAfterPageShow } from "./server-sdk"
-import type { OpenCodeEvent } from "@opencode-ai/client/promise"
+import type { OpenCodeEvent } from "@opencode-ai/client-next"
 import type { Event } from "@opencode-ai/sdk/v2/client"
 
 describe("resumeStreamAfterPageShow", () => {
@@ -27,7 +27,7 @@ describe("adaptServerEvent", () => {
     expect(adaptServerEvent(current)).toMatchObject({
       type: "permission.asked",
       properties: { id: "perm_1", sessionID: "ses_1", permission: "read", patterns: ["src/**"] },
-      current,
+      current: { id: "evt_1", type: "permission.v2.asked", data: current.data },
     })
   })
 })
@@ -57,9 +57,9 @@ describe("coalesceServerEvents", () => {
       adaptServerEvent({
         id,
         created: 1,
-        type: "session.text.delta",
+        type: "session.next.text.delta",
         location: { directory: "/repo" },
-        data: { sessionID: "ses", assistantMessageID: "msg", ordinal: 0, delta: value },
+        data: { timestamp: 1, sessionID: "ses", assistantMessageID: "msg", textID: "text", delta: value },
       } as OpenCodeEvent)
     const result = coalesceServerEvents([
       { directory: "/repo", payload: current("evt_1", "hello ") },

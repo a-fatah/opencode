@@ -754,6 +754,27 @@ describe("OpenAI Responses route", () => {
     }),
   )
 
+  it.effect("keeps rotating Copilot item IDs in one text block", () =>
+    Effect.gen(function* () {
+      const body = sseEvents(
+        { type: "response.output_text.delta", item_id: "encrypted_1", output_index: 0, content_index: 0, delta: "Hello" },
+        { type: "response.output_text.delta", item_id: "encrypted_2", output_index: 0, content_index: 0, delta: " world" },
+        { type: "response.completed", response: { id: "resp_1" } },
+      )
+
+      const response = yield* LLMClient.generate(request).pipe(Effect.provide(fixedResponse(body)))
+
+      expect(response.text).toBe("Hello world")
+      expect(response.events.filter((event) => event.type === "text-start")).toEqual([
+        { type: "text-start", id: "text-0:0" },
+      ])
+      expect(response.events.filter((event) => event.type === "text-end")).toEqual([
+        { type: "text-end", id: "text-0:0" },
+      ])
+      expect(response.message.content).toEqual([{ type: "text", text: "Hello world" }])
+    }),
+  )
+
   it.effect("parses reasoning summary stream fixtures", () =>
     Effect.gen(function* () {
       const body = sseEvents(

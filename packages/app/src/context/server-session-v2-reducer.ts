@@ -1,4 +1,11 @@
-import type { OpenCodeEvent, SessionMessageInfo, SessionPendingMessage } from "@opencode-ai/client/promise"
+import type {
+  OpenCodeEvent as LegacyOpenCodeEvent,
+  SessionMessageInfo,
+  SessionPendingMessage,
+} from "@opencode-ai/client/promise"
+import type { OpenCodeEvent as NextOpenCodeEvent } from "@opencode-ai/client-next"
+
+export type NativeOpenCodeEvent = LegacyOpenCodeEvent | (NextOpenCodeEvent & { readonly created: number })
 
 type Assistant = Extract<SessionMessageInfo, { type: "assistant" }>
 type Compaction = Extract<SessionMessageInfo, { type: "compaction" }>
@@ -13,8 +20,9 @@ export type V2SessionReduction = {
 
 export function createV2SessionReducer() {
   const pending = new Map<string, SessionPendingMessage>()
+  const contentOrdinals = new Map<string, number>()
 
-  const reduce = (source: readonly SessionMessageInfo[], event: OpenCodeEvent): V2SessionReduction | undefined => {
+  const reduce = (source: readonly SessionMessageInfo[], event: NativeOpenCodeEvent): V2SessionReduction | undefined => {
     if (!("data" in event) || !("sessionID" in event.data) || typeof event.data.sessionID !== "string") return
     const sessionID = event.data.sessionID
     const result = (messages: SessionMessageInfo[], touched: string[] = []): V2SessionReduction => ({
@@ -26,6 +34,137 @@ export function createV2SessionReducer() {
       result(source.some((item) => item.id === message.id) ? [...source] : [...source, message], [message.id])
 
     switch (event.type) {
+      case "session.next.step.started": {
+        const current = source.findLast((item): item is Assistant => item.type === "assistant" && !item.time.completed)
+        const completed =
+          current && current.id !== event.data.assistantMessageID
+            ? update(source, current.id, (item) =>
+                item.type === "assistant"
+                  ? { ...item, retry: undefined, time: { ...item.time, completed: event.created } }
+                  : item,
+              )
+            : [...source]
+        const existing = completed.find((item) => item.id === event.data.assistantMessageID)
+        if (existing?.type === "assistant")
+          return result(
+            update(completed, existing.id, (item) =>
+              item.type === "assistant"
+                ? {
+                    ...item,
+                    agent: event.data.agent,
+                    model: event.data.model,
+                    retry: undefined,
+                    error: undefined,
+                    finish: undefined,
+                    snapshot: event.data.snapshot ? { ...item.snapshot, start: event.data.snapshot } : item.snapshot,
+                    time: { ...item.time, completed: undefined },
+                  }
+                : item,
+            ),
+            current && current.id !== existing.id ? [current.id, existing.id] : [existing.id],
+          )
+        return result(
+          [
+            ...completed,
+            {
+              id: event.data.assistantMessageID,
+              type: "assistant",
+              agent: event.data.agent,
+              model: event.data.model,
+              content: [],
+              snapshot: event.data.snapshot ? { start: event.data.snapshot } : undefined,
+              time: { created: event.created },
+            },
+          ],
+          current ? [current.id, event.data.assistantMessageID] : [event.data.assistantMessageID],
+        )
+      }
+      case "session.next.step.ended":
+        return updateAssistant(source, event.data.assistantMessageID, sessionID, (item) => ({
+          ...item,
+          finish: normalizeFinish(event.data.finish),
+          cost: event.data.cost,
+          tokens: event.data.tokens,
+          snapshot:
+            event.data.snapshot || event.data.files
+              ? { ...item.snapshot, end: event.data.snapshot, files: event.data.files ? [...event.data.files] : undefined }
+              : item.snapshot,
+          time: { ...item.time, completed: event.created },
+        }))
+      case "session.next.step.failed":
+        return updateAssistant(source, event.data.assistantMessageID, sessionID, (item) => ({
+          ...item,
+          finish: "error",
+          error: event.data.error,
+          retry: undefined,
+          time: { ...item.time, completed: event.created },
+        }))
+      case "session.next.text.started": {
+        const ordinal = rememberContentOrdinal(contentOrdinals, source, sessionID, event.data.assistantMessageID, "text", event.data.textID)
+        return updateAssistant(source, event.data.assistantMessageID, sessionID, (item) => ({
+          ...item,
+          content: insertOrdinal(item.content, "text", ordinal, { type: "text", text: "" }),
+        }))
+      }
+      case "session.next.text.delta": {
+        const ordinal = contentOrdinals.get(contentKey(sessionID, event.data.assistantMessageID, "text", event.data.textID))
+        if (ordinal === undefined) return result([...source])
+        return updateContent(source, event.data.assistantMessageID, sessionID, "text", ordinal, (item) => ({
+          ...item,
+          text: item.text + event.data.delta,
+        }))
+      }
+      case "session.next.text.ended": {
+        const ordinal = rememberContentOrdinal(contentOrdinals, source, sessionID, event.data.assistantMessageID, "text", event.data.textID)
+        return updateAssistant(source, event.data.assistantMessageID, sessionID, (item) => ({
+          ...item,
+          content: replaceOrdinal(
+            insertOrdinal(item.content, "text", ordinal, { type: "text", text: "" }),
+            "text",
+            ordinal,
+            (content) => ({ ...content, text: event.data.text }),
+          ),
+        }))
+      }
+      case "session.next.reasoning.started": {
+        const ordinal = rememberContentOrdinal(contentOrdinals, source, sessionID, event.data.assistantMessageID, "reasoning", event.data.reasoningID)
+        return updateAssistant(source, event.data.assistantMessageID, sessionID, (item) => ({
+          ...item,
+          content: insertOrdinal(item.content, "reasoning", ordinal, {
+            type: "reasoning",
+            text: "",
+            time: { created: event.created },
+          }),
+        }))
+      }
+      case "session.next.reasoning.delta": {
+        const ordinal = contentOrdinals.get(contentKey(sessionID, event.data.assistantMessageID, "reasoning", event.data.reasoningID))
+        if (ordinal === undefined) return result([...source])
+        return updateContent(source, event.data.assistantMessageID, sessionID, "reasoning", ordinal, (item) => ({
+          ...item,
+          text: item.text + event.data.delta,
+        }))
+      }
+      case "session.next.reasoning.ended": {
+        const ordinal = rememberContentOrdinal(contentOrdinals, source, sessionID, event.data.assistantMessageID, "reasoning", event.data.reasoningID)
+        return updateAssistant(source, event.data.assistantMessageID, sessionID, (item) => ({
+          ...item,
+          content: replaceOrdinal(
+            insertOrdinal(item.content, "reasoning", ordinal, {
+              type: "reasoning",
+              text: "",
+              time: { created: event.created },
+            }),
+            "reasoning",
+            ordinal,
+            (content) => ({
+              ...content,
+              text: event.data.text,
+              time: { created: content.time?.created ?? event.created, completed: event.created },
+            }),
+          ),
+        }))
+      }
       case "session.input.admitted":
         pending.set(key(sessionID, event.data.inputID), event.data.input)
         return result([...source])
@@ -412,8 +551,38 @@ export function createV2SessionReducer() {
       for (const id of pending.keys()) {
         if (id.startsWith(`${sessionID}:`)) pending.delete(id)
       }
+      for (const id of contentOrdinals.keys()) {
+        if (id.startsWith(`${sessionID}:`)) contentOrdinals.delete(id)
+      }
     },
   }
+}
+
+function contentKey(sessionID: string, messageID: string, type: "text" | "reasoning", id: string) {
+  return `${sessionID}:${messageID}:${type}:${id}`
+}
+
+function normalizeFinish(value: string): Assistant["finish"] {
+  if (value === "stop" || value === "length" || value === "tool-calls" || value === "content-filter" || value === "error")
+    return value
+  return "unknown"
+}
+
+function rememberContentOrdinal(
+  ordinals: Map<string, number>,
+  source: readonly SessionMessageInfo[],
+  sessionID: string,
+  messageID: string,
+  type: "text" | "reasoning",
+  id: string,
+) {
+  const key = contentKey(sessionID, messageID, type, id)
+  const existing = ordinals.get(key)
+  if (existing !== undefined) return existing
+  const assistant = source.find((item): item is Assistant => item.id === messageID && item.type === "assistant")
+  const ordinal = assistant?.content.filter((item) => item.type === type).length ?? 0
+  ordinals.set(key, ordinal)
+  return ordinal
 }
 
 function key(sessionID: string, inputID: string) {
@@ -506,4 +675,19 @@ function insertOrdinal<T extends Assistant["content"][number]["type"]>(
   const matches = source.filter((content) => content.type === type)
   if (matches[ordinal]) return source
   return [...source, item]
+}
+
+function replaceOrdinal<T extends "text" | "reasoning">(
+  source: Assistant["content"],
+  type: T,
+  ordinal: number,
+  apply: (
+    item: Extract<Assistant["content"][number], { type: T }>,
+  ) => Extract<Assistant["content"][number], { type: T }>,
+) {
+  let index = -1
+  return source.map((item) => {
+    if (item.type !== type || ++index !== ordinal) return item
+    return apply(item as Extract<Assistant["content"][number], { type: T }>)
+  })
 }

@@ -2066,11 +2066,11 @@ export default function Page() {
       <Show when={!isDesktop() && !!params.id && settings.general.newLayoutDesigns() && !mobileTabsBottom()}>
         {mobileTabs(true)}
       </Show>
-      <Show when={params.id && sessionProvenance(info()) ? { sessionID: params.id, provenance: sessionProvenance(info())! } : undefined}>
-        {(source) => (
+      <Show when={sessionProvenance(info()) ? params.id : undefined} keyed>
+        {(sessionID) => (
           <SessionProvenancePanel
-            sessionID={source().sessionID}
-            provenance={source().provenance}
+            sessionID={sessionID}
+            provenance={sessionProvenance(info())}
             serverSDK={serverSDK()}
           />
         )}

@@ -135,10 +135,10 @@ export function criteriaSummary(criteria: {
   readonly assignee?: "me" | { readonly id: string }
   readonly labels?: readonly string[]
   readonly statuses?: readonly string[]
-}) {
+}, assigneeName?: string) {
   const parts = [
     criteria.issueProjects.length ? criteria.issueProjects.join(", ") : "All issue projects",
-    criteria.assignee === "me" ? "assigned to me" : criteria.assignee ? `assignee ${criteria.assignee.id}` : undefined,
+    criteria.assignee === "me" ? "assigned to me" : criteria.assignee ? `assigned to ${assigneeName ?? "Unknown user"}` : undefined,
     criteria.labels?.length ? `${criteria.labels.length} label${criteria.labels.length === 1 ? "" : "s"}` : undefined,
     criteria.statuses?.length ? criteria.statuses.join(", ") : undefined,
   ].filter((part): part is string => !!part)

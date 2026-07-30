@@ -535,6 +535,47 @@ describe("IssueWatcher", () => {
     }),
   )
 
+  it.effect("resolves an assignee summary from cached provider metadata", () =>
+    Effect.gen(function* () {
+      const credentials = yield* Credential.Service
+      yield* credentials.createConnection({
+        integrationID: input.integrationID,
+        connectionID: input.connectionID,
+        tenantIdentity: "example.com",
+        value: Credential.Key.make({ type: "key", key: "secret" }),
+      })
+      const now = Date.now()
+      const database = yield* Database.Service
+      yield* database.db.update(IssueMetadataSnapshotTable).set({
+        snapshot: {
+          connectionID: input.connectionID,
+          projects: {
+            opencode: {
+              users: [{ id: "user-1", name: "Ada", imageUrl: "https://example.com/ada.png" }],
+              statuses: [],
+              components: [],
+              issueTypes: [],
+              syncedAt: now,
+            },
+          },
+          updatedAt: now,
+        },
+        time_updated: now,
+      }).where(eq(IssueMetadataSnapshotTable.connection_id, input.connectionID)).run().pipe(Effect.orDie)
+      yield* (yield* IssueWatcher.Service).create({
+        ...input,
+        enabled: false,
+        criteria: { ...input.criteria, assignee: { id: "user-1" } },
+      })
+
+      expect((yield* (yield* IssueWatcher.Service).list())[0]?.assignee).toEqual({
+        id: "user-1",
+        name: "Ada",
+        imageUrl: "https://example.com/ada.png",
+      })
+    }),
+  )
+
   it.effect("returns not found for unknown watcher operations", () =>
     Effect.gen(function* () {
       const service = yield* IssueWatcher.Service

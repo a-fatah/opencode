@@ -852,6 +852,7 @@ export type IssueWatchersListOutput = ReadonlyArray<{
   }
   readonly sourceName: string
   readonly sourceGlyph: string
+  readonly assignee?: { readonly id: string; readonly name: string; readonly imageUrl?: string }
   readonly connection?: {
     readonly id: string
     readonly label: string

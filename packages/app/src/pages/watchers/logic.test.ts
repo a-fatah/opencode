@@ -35,6 +35,10 @@ describe("watcher editor logic", () => {
       mappings: [{ key: { type: "label", value: "frontend" }, projectID: "prj_web" }],
     }
     expect(criteriaSummary(draft.criteria)).toBe("ENG · assigned to me · 1 label")
+    expect(criteriaSummary({ ...draft.criteria, assignee: { id: "jira-account-id" } }, "Ada Lovelace"))
+      .toBe("ENG · assigned to Ada Lovelace · 1 label")
+    expect(criteriaSummary({ ...draft.criteria, assignee: { id: "jira-account-id" } }))
+      .toBe("ENG · assigned to Unknown user · 1 label")
     expect(routingSummary(draft.routing)).toBe("1 mapping")
   })
 

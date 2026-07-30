@@ -7,7 +7,9 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { DialogConnectSource } from "@/components/settings-v2/dialog-connect-source"
 import { IssueSourceIcon } from "@/components/issue-source-icon"
 import { useServerSDK } from "@/context/server-sdk"
+import { useLanguage } from "@/context/language"
 import { requireServerKey, sessionHref } from "@/utils/session-route"
+import { getRelativeTime } from "@/utils/time"
 import { issueWatcherApi, watcherConnectionSource, type InboxItem, type InboxSummary } from "./watchers/api"
 import { authExpiredMessage, inboxAttentionCount, inboxBulkActionSupports, inboxQuery, selectableInboxItem, watcherAuthExpired, type InboxBulkAction, type InboxFilter } from "./watchers/logic"
 
@@ -235,6 +237,7 @@ function InboxRow(props: {
   onRoute: () => void
   onDuplicate: () => void
 }) {
+  const language = useLanguage()
   const state = () => props.item.match.state
   const project = () => props.item.project?.name ?? props.item.match.routeReason ?? "No project matched"
   const retryable = () => props.item.materialization?.state === "failed" && !props.item.materialization.providerStarted
@@ -247,7 +250,7 @@ function InboxRow(props: {
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2"><a href={props.item.match.externalUrl} target="_blank" rel="noreferrer" class="text-13-medium text-v2-text-text-strong hover:underline">{props.item.match.externalKey}</a><For each={props.item.match.payload.labels.slice(0, 3)}>{(label) => <span class="rounded-full bg-v2-background-bg-surface px-2 py-0.5 text-10-regular text-v2-text-text-muted">{label}</span>}</For></div>
           <p class="mt-1 truncate text-14-regular text-v2-text-text-base">{props.item.match.payload.title}</p>
-          <p class="mt-1 text-11-regular text-v2-text-text-muted">{props.item.watcherName} · {relativeTime(props.item.match.timeUpdated)} · {project()}</p>
+          <p class="mt-1 text-11-regular text-v2-text-text-muted">{props.item.watcherName} · {getRelativeTime(props.item.match.timeUpdated, language.t)} · {project()}</p>
         </div>
       </div>
       <div class="flex w-full flex-wrap items-center gap-2 md:w-auto md:shrink-0 md:justify-end">
@@ -390,4 +393,3 @@ function SetupStep(props: { number: string; title: string; children: string }) {
 function Filter(props: { active: boolean; onClick: () => void; children: import("solid-js").JSX.Element }) { return <button type="button" classList={{ "border-v2-border-border-focus bg-v2-background-bg-surface text-v2-text-text-strong": props.active }} class="rounded-full border border-v2-border-border-base px-3 py-1.5 text-12-medium text-v2-text-text-muted" onClick={props.onClick}>{props.children}</button> }
 function Status(props: { children: string }) { return <p class="rounded-xl border border-v2-border-border-base bg-v2-background-bg-base py-12 text-center text-13-regular text-v2-text-text-muted">{props.children}</p> }
 function ResourceError(props: { message: string; onRetry: () => void }) { return <section class="rounded-xl border border-v2-border-border-danger bg-v2-background-bg-base p-5 text-center"><p class="text-13-regular text-v2-text-text-danger">{props.message}</p><div class="mt-3"><ButtonV2 variant="outline" onClick={props.onRetry}>Retry</ButtonV2></div></section> }
-function relativeTime(value: number) { const minutes = Math.max(0, Math.floor((Date.now() - value) / 60_000)); if (minutes < 1) return "just now"; if (minutes < 60) return `${minutes}m ago`; const hours = Math.floor(minutes / 60); if (hours < 24) return `${hours}h ago`; return `${Math.floor(hours / 24)}d ago` }

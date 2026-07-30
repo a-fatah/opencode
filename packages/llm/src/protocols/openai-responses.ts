@@ -235,6 +235,7 @@ type OpenAIResponsesEvent = Schema.Schema.Type<typeof OpenAIResponsesEvent>
 
 interface ParserState {
   readonly tools: ToolStream.State<string>
+  readonly pendingToolInputs: Readonly<Record<string, string>>
   readonly hasFunctionCall: boolean
   readonly lifecycle: Lifecycle.State
   readonly reasoningItems: Readonly<Record<string, ReasoningStreamItem>>
@@ -673,19 +674,31 @@ const onOutputItemAdded = (state: ParserState, event: OpenAIResponsesEvent): Ste
   const providerMetadata = openaiMetadata({ itemId: item.id })
   const events: LLMEvent[] = []
   const lifecycle = Lifecycle.stepStart(state.lifecycle, events)
+  const tools = ToolStream.start(state.tools, item.id, {
+    id: item.call_id ?? item.id,
+    name: item.name ?? "",
+    input: item.arguments ?? "",
+    providerMetadata,
+  })
+  const pending = state.pendingToolInputs[item.id]
+  const appended = pending
+    ? ToolStream.appendExisting(ADAPTER, tools, item.id, pending, "OpenAI Responses tool call disappeared")
+    : undefined
+  const pendingToolInputs = { ...state.pendingToolInputs }
+  delete pendingToolInputs[item.id]
   return [
     {
       ...state,
       lifecycle,
       hasFunctionCall: state.hasFunctionCall,
-      tools: ToolStream.start(state.tools, item.id, {
-        id: item.call_id ?? item.id,
-        name: item.name ?? "",
-        input: item.arguments ?? "",
-        providerMetadata,
-      }),
+      tools: appended && !ToolStream.isError(appended) ? appended.tools : tools,
+      pendingToolInputs,
     },
-    [...events, LLMEvent.toolInputStart({ id: item.call_id ?? item.id, name: item.name ?? "", providerMetadata })],
+    [
+      ...events,
+      LLMEvent.toolInputStart({ id: item.call_id ?? item.id, name: item.name ?? "", providerMetadata }),
+      ...(appended && !ToolStream.isError(appended) ? appended.events : []),
+    ],
   ]
 }
 
@@ -791,6 +804,18 @@ const onFunctionCallArgumentsDelta = Effect.fn("OpenAIResponses.onFunctionCallAr
   event: OpenAIResponsesEvent,
 ) {
   if (!event.item_id || !event.delta) return [state, NO_EVENTS] satisfies StepResult
+  if (!state.tools[event.item_id]) {
+    return [
+      {
+        ...state,
+        pendingToolInputs: {
+          ...state.pendingToolInputs,
+          [event.item_id]: `${state.pendingToolInputs[event.item_id] ?? ""}${event.delta}`,
+        },
+      },
+      NO_EVENTS,
+    ] satisfies StepResult
+  }
   const result = ToolStream.appendExisting(
     ADAPTER,
     state.tools,
@@ -814,9 +839,10 @@ const onOutputItemDone = Effect.fn("OpenAIResponses.onOutputItemDone")(function*
 
   if (item.type === "function_call") {
     if (!item.id || !item.call_id || !item.name) return [state, NO_EVENTS] satisfies StepResult
+    const pending = state.pendingToolInputs[item.id]
     const tools = state.tools[item.id]
       ? state.tools
-      : ToolStream.start(state.tools, item.id, { id: item.call_id, name: item.name })
+      : ToolStream.start(state.tools, item.id, { id: item.call_id, name: item.name, input: pending })
     const result =
       item.arguments === undefined
         ? yield* ToolStream.finish(ADAPTER, tools, item.id)
@@ -825,12 +851,15 @@ const onOutputItemDone = Effect.fn("OpenAIResponses.onOutputItemDone")(function*
     const resultEvents = result.events ?? []
     const lifecycle = resultEvents.length ? Lifecycle.stepStart(state.lifecycle, events) : state.lifecycle
     events.push(...resultEvents)
+    const pendingToolInputs = { ...state.pendingToolInputs }
+    delete pendingToolInputs[item.id]
     return [
       {
         ...state,
         lifecycle,
         hasFunctionCall: resultEvents.some(LLMEvent.is.toolCall) ? true : state.hasFunctionCall,
         tools: result.tools,
+        pendingToolInputs,
       },
       events,
     ] satisfies StepResult
@@ -967,6 +996,7 @@ export const protocol = Protocol.make({
     initial: (request) => ({
       hasFunctionCall: false,
       tools: ToolStream.empty<string>(),
+      pendingToolInputs: {},
       lifecycle: Lifecycle.initial(),
       reasoningItems: {},
       store: OpenAIOptions.store(request),

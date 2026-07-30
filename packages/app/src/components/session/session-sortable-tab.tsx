@@ -70,7 +70,7 @@ export function SortableTab(props: {
           onMiddleClick={() => props.onTabClose(props.tab)}
           onDblClick={() => props.onTabDoubleClick?.(props.tab)}
         >
-          <Show when={content()}>{(value) => value()}</Show>
+          {content()}
         </Tabs.Trigger>
       </div>
     </div>

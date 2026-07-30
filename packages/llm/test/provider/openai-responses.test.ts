@@ -1220,6 +1220,44 @@ describe("OpenAI Responses route", () => {
     }),
   )
 
+  it.effect("buffers function arguments that arrive before the tool item", () =>
+    Effect.gen(function* () {
+      const body = sseEvents(
+        { type: "response.function_call_arguments.delta", item_id: "item_1", delta: '{"query"' },
+        { type: "response.function_call_arguments.delta", item_id: "item_1", delta: ':"weather"}' },
+        {
+          type: "response.output_item.added",
+          item: { type: "function_call", id: "item_1", call_id: "call_1", name: "lookup", arguments: "" },
+        },
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            id: "item_1",
+            call_id: "call_1",
+            name: "lookup",
+            arguments: '{"query":"weather"}',
+          },
+        },
+        { type: "response.completed", response: { usage: { input_tokens: 5, output_tokens: 1 } } },
+      )
+      const response = yield* LLMClient.generate(
+        LLM.updateRequest(request, {
+          tools: [{ name: "lookup", description: "Lookup data", inputSchema: { type: "object" } }],
+        }),
+      ).pipe(Effect.provide(fixedResponse(body)))
+
+      expect(response.events).toContainEqual({
+        type: "tool-call",
+        id: "call_1",
+        name: "lookup",
+        input: { query: "weather" },
+        providerExecuted: undefined,
+        providerMetadata: { openai: { itemId: "item_1" } },
+      })
+    }),
+  )
+
   it.effect("decodes web_search_call as provider-executed tool-call + tool-result", () =>
     Effect.gen(function* () {
       const item = {

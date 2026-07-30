@@ -3,7 +3,7 @@ import { createSimpleContext } from "@opencode-ai/ui/context"
 import { createStore, produce } from "solid-js/store"
 import { Persist, persisted, removePersisted, draftPersistedKeys } from "@/utils/persist"
 import { ServerConnection, useServer } from "./server"
-import { createEffect, getOwner, onCleanup, startTransition } from "solid-js"
+import { createEffect, getOwner, onCleanup, startTransition, untrack } from "solid-js"
 import { useLocation, useNavigate, useParams } from "@solidjs/router"
 import { usePlatform } from "./platform"
 import { uuid } from "@/utils/uuid"
@@ -71,6 +71,10 @@ export const tabHref = (tab: Tab) => {
 }
 
 export const tabKey = (tab: Tab) => (tab.type === "draft" ? `draft:${tab.draftID}` : `${tab.server}\n${tabHref(tab)}`)
+
+export function peekTabInfo(info: Record<string, TabInfo>, key: string) {
+  return untrack(() => info[key])
+}
 
 export function sessionHasOpenTab(tabs: Tab[], server: ServerConnection.Key, session: Session) {
   return tabs.some((tab) => tab.type === "session" && tab.server === server && tab.sessionId === session.id)
@@ -189,16 +193,16 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
       const nextTab = nextTabAfterClose(store, index, recentKey() === key && location.pathname !== "/")
       closing.add(key)
       void startTransition(() => {
-        setStore(
-          produce((tabs) => {
-            tabs.splice(index, 1)
-          }),
-        )
         if (nextTab === null) {
           setRecentKey(undefined)
           navigate("/")
         }
         if (nextTab) navigateTab(nextTab)
+        setStore(
+          produce((tabs) => {
+            tabs.splice(index, 1)
+          }),
+        )
       }).finally(() => closing.delete(key))
       memory.remove(key)
       removeInfo(key)
@@ -223,14 +227,12 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
       addUtilityTab: (tab: UtilityTab) => {
         const existing = store.find((item) => tabKey(item) === tabKey(tab))
         if (existing) return existing
-        void startTransition(() => {
-          setStore(
-            produce((tabs) => {
-              if (tabs.some((item) => tabKey(item) === tabKey(tab))) return
-              tabs.push(tab)
-            }),
-          )
-        })
+        setStore(
+          produce((tabs) => {
+            if (tabs.some((item) => tabKey(item) === tabKey(tab))) return
+            tabs.push(tab)
+          }),
+        )
         return tab
       },
       openUtilityTab(tab: UtilityTab) {
@@ -412,21 +414,21 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
       },
       rememberSessionInfo(tab: SessionTab, session: Session) {
         const key = tabKey(tab)
-        const next = { ...info[key], title: session.title, directory: session.directory }
-        const current = info[key]
+        const current = peekTabInfo(info, key)
+        const next = { ...current, title: session.title, directory: session.directory }
         if (current?.title === next.title && current.directory === next.directory) return
         setInfo(key, next)
       },
       rememberInfo(tab: Tab, next: TabInfo) {
         const key = tabKey(tab)
-        const current = info[key]
+        const current = peekTabInfo(info, key)
         if (current?.title === next.title && current.directory === next.directory && current.awaitingRun === next.awaitingRun)
           return
         setInfo(key, { ...current, ...next })
       },
       rememberAwaitingRun(tab: SessionTab, awaitingRun: TabInfo["awaitingRun"]) {
         const key = tabKey(tab)
-        setInfo(key, { ...info[key], awaitingRun })
+        setInfo(key, { ...peekTabInfo(info, key), awaitingRun })
       },
       select: navigateTab,
       remember(tab: Tab) {

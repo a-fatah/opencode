@@ -558,7 +558,7 @@ const verifyPartialFlushOnInterruption = (kind: FragmentKind) =>
   })
 
 describe("SessionRunnerLLM", () => {
-  it.effect("promotes only the claimed input for a one-shot run", () =>
+  it.effect("promotes only the claimed input and continues after its tool calls", () =>
     Effect.gen(function* () {
       yield* setup
       const { db } = yield* Database.Service
@@ -586,15 +586,26 @@ describe("SessionRunnerLLM", () => {
           data: { sessionID, messageID: claimed.id, attemptID, ownerEpoch: "test", timestamp },
         },
       ])
-      responseStream = Stream.fromIterable(fragmentFixture("text", "one-shot", ["Done"]).completeEvents)
+      responses = [
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolCall({ id: "call-read", name: "read", input: { filePath: "README.md" } }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          LLMEvent.finish({ reason: "tool-calls" }),
+        ],
+        fragmentFixture("text", "claimed-final", ["Done"]).completeEvents,
+      ]
 
       yield* (yield* SessionRunner.Service).run({ sessionID, force: true, claimedMessageID: claimed.id })
 
-      expect((yield* session.context(sessionID)).filter((message) => message.type === "user")).toMatchObject([
-        { type: "user", text: "Claimed" },
-      ])
+      expect((yield* session.context(sessionID)).filter((message) => message.type === "user" && message.text === "Claimed"))
+        .toHaveLength(1)
       expect(yield* SessionInput.find(db, claimed.id)).toHaveProperty("promotedSeq")
       expect(yield* SessionInput.find(db, other.id)).not.toHaveProperty("promotedSeq")
+      expect(requests).toHaveLength(2)
+      const context = yield* session.context(sessionID)
+      expect(context.some((message) => message.type === "assistant" && message.finish === "tool-calls")).toBe(true)
+      expect(context.at(-1)).toMatchObject({ type: "assistant", content: [{ type: "text", text: "Done" }] })
       requests.length = 0
     }),
   )

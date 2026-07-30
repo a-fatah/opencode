@@ -1,4 +1,4 @@
-import { A, useNavigate, useParams } from "@solidjs/router"
+import { A, useParams } from "@solidjs/router"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitle } from "@opencode-ai/ui/v2/dialog-v2"
 import { createEffect, createMemo, createResource, For, onCleanup, onMount, Show } from "solid-js"
@@ -8,7 +8,8 @@ import { DialogConnectSource } from "@/components/settings-v2/dialog-connect-sou
 import { IssueSourceIcon } from "@/components/issue-source-icon"
 import { useServerSDK } from "@/context/server-sdk"
 import { useLanguage } from "@/context/language"
-import { requireServerKey, sessionHref } from "@/utils/session-route"
+import { useTabs } from "@/context/tabs"
+import { requireServerKey } from "@/utils/session-route"
 import { getRelativeTime } from "@/utils/time"
 import { issueWatcherApi, watcherConnectionSource, type InboxItem, type InboxSummary } from "./watchers/api"
 import { authExpiredMessage, inboxAttentionCount, inboxBulkActionSupports, inboxQuery, selectableInboxItem, watcherAuthExpired, type InboxBulkAction, type InboxFilter } from "./watchers/logic"
@@ -32,7 +33,7 @@ async function projectTargets(serverSdk: ReturnType<typeof useServerSDK>, projec
 export function InboxPage() {
   const serverSdk = useServerSDK()
   const dialog = useDialog()
-  const navigate = useNavigate()
+  const tabs = useTabs()
   const params = useParams<{ serverKey: string }>()
   const [store, setStore] = createStore({
     filter: "all" as InboxFilter,
@@ -101,7 +102,10 @@ export function InboxPage() {
       .catch((error: Error) => setStore("error", error.message))
     setStore("loadingMore", false)
   }
-  const openSession = (sessionID: string) => navigate(sessionHref(requireServerKey(params.serverKey), sessionID))
+  const openSession = (sessionID: string) => {
+    const tab = tabs.addSessionTab({ server: requireServerKey(params.serverKey), sessionId: sessionID })
+    tabs.select(tab)
+  }
   const refresh = async () => {
     setStore("selected", {})
     await refetch()
@@ -369,7 +373,14 @@ function DuplicateInboxDialog(props: {
   const serverSdk = useServerSDK()
   const dialog = useDialog()
   const [store, setStore] = createStore({ busy: "", error: "" })
-  const [detail] = createResource(() => props.item.match.id, (matchID) => issueWatcherApi(serverSdk()).duplicateDetail({ matchID }))
+  const [detail] = createResource(() => props.item.match.id, async (matchID) => {
+    try {
+      return { data: await issueWatcherApi(serverSdk()).duplicateDetail({ matchID }) }
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : "Unable to load duplicate details." }
+    }
+  })
+  const current = () => detail()?.data
   const resolve = async (action: "continue" | "create_second" | "ignore") => {
     setStore({ busy: action, error: "" })
     await issueWatcherApi(serverSdk()).resolveDuplicate({
@@ -387,19 +398,19 @@ function DuplicateInboxDialog(props: {
     <Dialog size="large">
       <DialogHeader><DialogTitle>Duplicate issue: {props.item.match.externalKey}</DialogTitle></DialogHeader>
       <DialogBody class="flex max-h-[60vh] w-full flex-col gap-4 overflow-y-auto px-4 py-4">
-        <Show when={!detail.error} fallback={<p class="text-12-regular text-v2-text-text-danger">{detail.error?.message}</p>}>
-          <Show when={detail()} fallback={<p class="text-12-regular text-v2-text-text-muted">Loading changes...</p>}>
-            {(current) => <Show when={current().diff.length} fallback={<p class="text-12-regular text-v2-text-text-muted">No field-level changes were reported.</p>}><For each={current().diff}>{(change) => <div class="rounded-lg border border-v2-border-border-base p-3"><p class="text-12-medium text-v2-text-text-strong">{change.field}</p><div class="mt-2 grid gap-2 sm:grid-cols-2"><pre class="overflow-auto whitespace-pre-wrap rounded bg-v2-background-bg-surface p-2 text-11-regular text-v2-text-text-muted">{formatDiffValue(change.before)}</pre><pre class="overflow-auto whitespace-pre-wrap rounded bg-v2-background-bg-surface p-2 text-11-regular text-v2-text-text-base">{formatDiffValue(change.after)}</pre></div></div>}</For></Show>}
+        <Show when={detail()?.error} fallback={
+          <Show when={current()} fallback={<p class="text-12-regular text-v2-text-text-muted">Loading changes...</p>}>
+            <Show when={current()!.diff.length} fallback={<p class="text-12-regular text-v2-text-text-muted">No field-level changes were reported.</p>}><For each={current()!.diff}>{(change) => <div class="rounded-lg border border-v2-border-border-base p-3"><p class="text-12-medium text-v2-text-text-strong">{change.field}</p><div class="mt-2 grid gap-2 sm:grid-cols-2"><pre class="overflow-auto whitespace-pre-wrap rounded bg-v2-background-bg-surface p-2 text-11-regular text-v2-text-text-muted">{formatDiffValue(change.before)}</pre><pre class="overflow-auto whitespace-pre-wrap rounded bg-v2-background-bg-surface p-2 text-11-regular text-v2-text-text-base">{formatDiffValue(change.after)}</pre></div></div>}</For></Show>
           </Show>
-        </Show>
+        }><p class="text-12-regular text-v2-text-text-danger">{detail()?.error}</p></Show>
         <Show when={store.error}><p class="text-12-regular text-v2-text-text-danger">{store.error}</p></Show>
       </DialogBody>
       <DialogFooter>
         <ButtonV2 variant="neutral" disabled={!!store.busy} onClick={() => dialog.close()}>Cancel</ButtonV2>
-        <Show when={detail()?.primary}>{(primary) => <ButtonV2 variant="ghost" disabled={!!store.busy} onClick={() => { dialog.close(); props.onOpenSession(primary().sessionID) }}>Open session</ButtonV2>}</Show>
-        <ButtonV2 variant="ghost" disabled={!!store.busy || !detail()} onClick={() => void resolve("ignore")}>Ignore</ButtonV2>
-        <ButtonV2 variant="outline" disabled={!!store.busy || !detail()} onClick={() => void resolve("create_second")}>Create second</ButtonV2>
-        <ButtonV2 variant="contrast" disabled={!!store.busy || !detail()?.primary} onClick={() => void resolve("continue")}>Continue session</ButtonV2>
+        <Show when={current()?.primary}><ButtonV2 variant="ghost" disabled={!!store.busy} onClick={() => { dialog.close(); props.onOpenSession(current()!.primary!.sessionID) }}>Open session</ButtonV2></Show>
+        <ButtonV2 variant="ghost" disabled={!!store.busy || !current()} onClick={() => void resolve("ignore")}>Ignore</ButtonV2>
+        <ButtonV2 variant="outline" disabled={!!store.busy || !current()} onClick={() => void resolve("create_second")}>Create second</ButtonV2>
+        <ButtonV2 variant="contrast" disabled={!!store.busy || !current()?.primary} onClick={() => void resolve("continue")}>Continue session</ButtonV2>
       </DialogFooter>
     </Dialog>
   )

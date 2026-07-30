@@ -40,7 +40,13 @@ export function NewSessionView(props: {
         <div class="absolute inset-x-0 top-[25.375%] flex justify-center px-6">
           <div class={NEW_SESSION_CONTENT_WIDTH}>
             <WordmarkV2 class="h-auto w-full text-v2-background-bg-inverse" />
-            <div class="mt-8 flex flex-col gap-8">
+            <div class="mt-3 flex flex-col items-center text-v2-background-bg-inverse">
+              <div class="text-[18px] font-medium uppercase tracking-[0.32em]">Relay</div>
+              <div class="mt-1 text-[11px] font-medium uppercase tracking-[0.2em]">
+                <span class="opacity-70">by </span><span class="text-[#f36c21]">E</span><span class="opacity-70">GYM</span>
+              </div>
+            </div>
+            <div class="mt-7 flex flex-col gap-8">
               <PromptInputV2Composer controller={props.input} />
               <Show when={props.project.empty()}>
                 <PromptProjectAddButton controller={props.project} />

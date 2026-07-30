@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { createRoot, getOwner, onCleanup } from "solid-js"
+import { createComputed, createRoot, getOwner, onCleanup } from "solid-js"
+import { createStore } from "solid-js/store"
 import { createTabMemory } from "./tab-memory"
 import { nextTabAfterClose, pushClosedTab, removeClosedTabs, takeClosedTab, type ClosedTab } from "./closed-tabs"
-import { tabHref, tabKey, type SessionTab, type Tab } from "./tabs"
+import { peekTabInfo, tabHref, tabKey, type SessionTab, type Tab, type TabInfo } from "./tabs"
 import type { ServerConnection } from "./server"
 
 const server = "local\nhttp://localhost:4096" as ServerConnection.Key
@@ -128,5 +129,22 @@ describe("utility tabs", () => {
     expect(tabHref(watchers)).toEndWith("/watchers")
     expect(tabHref(watcher)).toEndWith("/watchers/new%20rule")
     expect(new Set([tabKey(inbox), tabKey(watchers), tabKey(watcher)]).size).toBe(3)
+  })
+
+  test("reading current tab info does not subscribe metadata writers", () => {
+    createRoot((dispose) => {
+      const [info, setInfo] = createStore<Record<string, TabInfo>>({})
+      let runs = 0
+
+      createComputed(() => {
+        runs++
+        peekTabInfo(info, "watcher")
+      })
+      expect(runs).toBe(1)
+
+      setInfo("watcher", { title: "Watcher" })
+      expect(runs).toBe(1)
+      dispose()
+    })
   })
 })

@@ -1,14 +1,18 @@
 import { describe, expect, test } from "bun:test"
 import { Credential } from "@opencode-ai/schema/credential"
-import { Effect, Option } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { makeJira } from "@opencode-ai/core/issue-watcher/provider-jira"
 import { IssueProvider } from "@opencode-ai/core/issue-watcher/provider"
 
-const credential = (inputs = { site: " https://Example.ATLASSIAN.net///?ignored=yes#fragment ", email: " user@example.com " }) =>
-  Credential.Key.make({ type: "key", key: "api-token", inputs })
+const credential = (
+  inputs = { site: " https://Example.ATLASSIAN.net///?ignored=yes#fragment ", email: " user@example.com " },
+) => Credential.Key.make({ type: "key", key: "api-token", inputs })
 
-const connectionInputs = { site: " https://Example.ATLASSIAN.net///?ignored=yes#fragment ", email: " user@example.com " }
+const connectionInputs = {
+  site: " https://Example.ATLASSIAN.net///?ignored=yes#fragment ",
+  email: " user@example.com ",
+}
 
 const criteria = {
   issueProjects: ["ENG"],
@@ -221,6 +225,38 @@ describe("Jira issue provider", () => {
       },
       fields: {
         ...jiraIssue("42").fields,
+        description: {
+          type: "doc",
+          version: 1,
+          content: [
+            { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Context" }] },
+            {
+              type: "paragraph",
+              content: [
+                { type: "text", text: "See " },
+                {
+                  type: "text",
+                  text: "the design",
+                  marks: [{ type: "link", attrs: { href: "https://example.test/design" } }],
+                },
+                { type: "text", text: "." },
+              ],
+            },
+            {
+              type: "bulletList",
+              content: [
+                {
+                  type: "listItem",
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "Keep the old flow" }] }],
+                },
+                {
+                  type: "listItem",
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "Add the new flow" }] }],
+                },
+              ],
+            },
+          ],
+        } as Schema.Json,
         customfield_10427: " https://github.com/example/service ",
         customfield_20891: {
           type: "doc",
@@ -242,7 +278,8 @@ describe("Jira issue provider", () => {
       id: "42",
       key: "ENG-42",
       title: "Issue 42",
-      description: JSON.stringify({ type: "doc", version: 1, content: [] }),
+      description:
+        "## Context\n\nSee [the design](https://example.test/design).\n\n- Keep the old flow\n- Add the new flow",
       url: "https://example.atlassian.net/browse/ENG-42",
       status: "Open",
       assignee: { id: "user-1", name: "Ada" },

@@ -122,7 +122,7 @@ export function makeJira(http: HttpClient.HttpClient): IssueProvider.Adapter {
         typeof issue.fields.description === "string"
           ? issue.fields.description
           : issue.fields.description
-            ? JSON.stringify(issue.fields.description)
+            ? jiraDocumentMarkdown(issue.fields.description)
             : "",
       url: `${base}/browse/${encodeURIComponent(issue.key)}`,
       status: issue.fields.status.name,
@@ -354,6 +354,95 @@ function jiraFieldText(value: Schema.Json | undefined): string | undefined {
 
 function isJsonArray(value: Schema.Json): value is ReadonlyArray<Schema.Json> {
   return Array.isArray(value)
+}
+
+function jiraDocumentMarkdown(value: Schema.Json): string {
+  return renderJiraBlock(value)
+    .replaceAll(/\n{3,}/g, "\n\n")
+    .trim()
+}
+
+function renderJiraBlock(value: Schema.Json, depth = 0): string {
+  if (typeof value === "string") return value
+  if (value === null || typeof value !== "object" || isJsonArray(value)) return ""
+
+  const content = isJsonArray(value.content) ? value.content : []
+  const children = (separator = "") => content.map((child) => renderJiraBlock(child, depth)).join(separator)
+  const attrs = value.attrs && typeof value.attrs === "object" && !isJsonArray(value.attrs) ? value.attrs : {}
+
+  if (value.type === "text") return renderJiraText(typeof value.text === "string" ? value.text : "", value.marks)
+  if (value.type === "hardBreak") return "\n"
+  if (value.type === "paragraph") return `${children()}\n\n`
+  if (value.type === "heading") {
+    const level = typeof attrs.level === "number" ? Math.min(6, Math.max(1, attrs.level)) : 1
+    return `${"#".repeat(level)} ${children()}\n\n`
+  }
+  if (value.type === "bulletList" || value.type === "orderedList") {
+    const start = value.type === "orderedList" && typeof attrs.order === "number" ? attrs.order : 1
+    return `${content
+      .map((item, index) => {
+        const marker = value.type === "orderedList" ? `${start + index}.` : "-"
+        return renderJiraListItem(item, marker, depth)
+      })
+      .join("\n")}\n\n`
+  }
+  if (value.type === "codeBlock") {
+    const language = typeof attrs.language === "string" ? attrs.language : ""
+    return `\`\`\`${language}\n${children().trimEnd()}\n\`\`\`\n\n`
+  }
+  if (value.type === "blockquote")
+    return `${children()
+      .trim()
+      .split("\n")
+      .map((line) => `> ${line}`)
+      .join("\n")}\n\n`
+  if (value.type === "rule") return "---\n\n"
+  if (value.type === "table") return `${renderJiraTable(content)}\n\n`
+  if (value.type === "mention" || value.type === "emoji" || value.type === "status") {
+    const text = attrs.text ?? attrs.shortName
+    return typeof text === "string" ? text : ""
+  }
+  if (value.type === "inlineCard") return typeof attrs.url === "string" ? attrs.url : ""
+  return children()
+}
+
+function renderJiraText(text: string, marks: Schema.Json | undefined): string {
+  if (!marks || !isJsonArray(marks)) return text
+  return marks.reduce<string>((result, mark) => {
+    if (mark === null || typeof mark !== "object" || isJsonArray(mark)) return result
+    if (mark.type === "strong") return `**${result}**`
+    if (mark.type === "em") return `*${result}*`
+    if (mark.type === "strike") return `~~${result}~~`
+    if (mark.type === "code") return `\`${result}\``
+    if (mark.type === "link" && mark.attrs && typeof mark.attrs === "object" && !isJsonArray(mark.attrs)) {
+      return typeof mark.attrs.href === "string" ? `[${result}](${mark.attrs.href})` : result
+    }
+    return result
+  }, text)
+}
+
+function renderJiraListItem(value: Schema.Json, marker: string, depth: number): string {
+  if (value === null || typeof value !== "object" || isJsonArray(value) || !isJsonArray(value.content)) return ""
+  const text = value.content
+    .map((child) => renderJiraBlock(child, depth + 1))
+    .join("")
+    .trim()
+  const indent = "  ".repeat(depth)
+  return text
+    .split("\n")
+    .map((line, index) => `${indent}${index === 0 ? `${marker} ` : "  "}${line}`)
+    .join("\n")
+}
+
+function renderJiraTable(rows: ReadonlyArray<Schema.Json>): string {
+  const cells = rows.map((row) => {
+    if (row === null || typeof row !== "object" || isJsonArray(row) || !isJsonArray(row.content)) return []
+    return row.content.map((cell) => renderJiraBlock(cell).replaceAll("|", "\\|").trim().replaceAll("\n", " "))
+  })
+  if (!cells[0]?.length) return ""
+  const header = `| ${cells[0].join(" | ")} |`
+  const separator = `| ${cells[0].map(() => "---").join(" | ")} |`
+  return [header, separator, ...cells.slice(1).map((row) => `| ${row.join(" | ")} |`)].join("\n")
 }
 
 function compareExternalID(left: string, right: string) {

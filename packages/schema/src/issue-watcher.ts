@@ -205,6 +205,7 @@ export const Summary = Schema.Struct({
   watcher: Info,
   sourceName: Schema.String,
   sourceGlyph: Schema.String,
+  assignee: optional(Schema.suspend(() => MetadataOption)),
   connection: optional(Schema.suspend(() => ConnectionSummary)),
   lastRun: optional(Run),
   recentMatchCount: NonNegativeInt,

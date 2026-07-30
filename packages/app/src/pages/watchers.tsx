@@ -82,7 +82,20 @@ export default function WatchersPage() {
     async () => {
       const api = issueWatcherApi(serverSdk())
       const [watchers, sources, summary] = await Promise.all([api.list(), api.sources(), api.inboxSummary()])
-      return { watchers, sources, summary }
+      const connections = [...new Set(watchers.flatMap((watcher) =>
+        watcher.watcher.integrationID === "jira" && typeof watcher.watcher.criteria.assignee === "object"
+          ? [watcher.watcher.connectionID]
+          : [],
+      ))]
+      const metadata = await Promise.all(connections.map(async (connectionID) =>
+        api.metadata({ integrationID: "jira", connectionID, issueProjects: [] })
+          .then((result) => [connectionID, result.metadata.users] as const)
+          .catch(() => [connectionID, []] as const),
+      ))
+      const users = new Map(metadata.flatMap(([connectionID, options]) =>
+        options.map((option) => [`${connectionID}:${option.id}`, option] as const),
+      ))
+      return { watchers, sources, summary, users }
     },
   )
   const connect = (watcher?: WatcherSummary) => {
@@ -157,6 +170,15 @@ export default function WatchersPage() {
                   <For each={current().watchers}>
                     {(watcher, index) => {
                       const info = () => watcher.watcher
+                      const assignee = () => {
+                        if (watcher.assignee) return watcher.assignee
+                        const selected = info().criteria.assignee
+                        if (typeof selected !== "object") return
+                        return current().users.get(`${info().connectionID}:${selected.id}`)
+                      }
+                      const assigneeName = () => typeof info().criteria.assignee === "object"
+                        ? assignee()?.name ?? "Unknown Jira user"
+                        : undefined
                       return (
                         <div classList={{ "border-t border-v2-border-border-base": index() > 0 }} class="flex flex-col gap-3 p-4 md:flex-row md:items-center">
                           <A href={href(`/${info().id}`)} class="min-w-0 flex-1 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-v2-border-border-focus">
@@ -169,9 +191,12 @@ export default function WatchersPage() {
                                 {info().action.mode === "run" ? "Auto-run" : info().action.mode === "awaiting_run" ? "Awaiting run" : "Inbox"}
                               </span>
                             </div>
-                            <p class="mt-2 truncate text-12-regular text-v2-text-text-muted">
-                              {criteriaSummary(info().criteria)} · {routingSummary(info().routing)}
-                            </p>
+                            <div class="mt-2 flex min-w-0 items-center gap-1.5 text-12-regular text-v2-text-text-muted">
+                              <Show when={assigneeName()}>
+                                {(name) => <Avatar fallback={name()} src={assignee()?.imageUrl} size="small" />}
+                              </Show>
+                              <p class="truncate">{criteriaSummary(info().criteria, assigneeName())} · {routingSummary(info().routing)}</p>
+                            </div>
                             <p class="mt-1 text-11-regular text-v2-text-text-muted">
                               {watcher.lastRun ? outcomeLabel(watcher.lastRun.outcome) : "No outcome yet"} · {watcher.recentMatchCount} recent matches
                             </p>

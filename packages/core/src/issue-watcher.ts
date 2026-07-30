@@ -1261,6 +1261,17 @@ const layer = Layer.effect(
       return yield* Effect.forEach(yield* listWatchers(), (watcher) => Effect.gen(function* () {
         const adapter = yield* providers.get(watcher.integrationID)
         const credential = yield* credentials.getConnection(watcher.connectionID)
+        const assigneeID = typeof watcher.criteria.assignee === "object" ? watcher.criteria.assignee.id : undefined
+        const snapshot = assigneeID
+          ? yield* metadataSnapshot(watcher.connectionID)
+          : undefined
+        const projectMetadata = watcher.criteria.issueProjects.length
+          ? watcher.criteria.issueProjects.flatMap((key) => snapshot?.projects[key] ? [snapshot.projects[key]] : [])
+          : Object.values(snapshot?.projects ?? {})
+        const assignee = assigneeID
+          ? uniqueMetadataOptions(projectMetadata.flatMap((project) => project.users))
+            .find((user) => user.id === assigneeID)
+          : undefined
         const lastRun = yield* db.select().from(IssueWatcherRunTable)
           .where(eq(IssueWatcherRunTable.watcher_id, watcher.id))
           .orderBy(desc(IssueWatcherRunTable.started_at), desc(IssueWatcherRunTable.id))
@@ -1272,6 +1283,7 @@ const layer = Layer.effect(
           watcher,
           sourceName: adapter?.name ?? watcher.integrationID,
           sourceGlyph: watcher.integrationID,
+          ...(assignee ? { assignee } : {}),
           ...(credential?.tenantIdentity && credential.value.type === "key" && credential.value.verification
             ? {
                 connection: {

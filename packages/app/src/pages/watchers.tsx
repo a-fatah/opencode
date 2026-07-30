@@ -1,6 +1,7 @@
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { Avatar } from "@opencode-ai/ui/v2/avatar-v2"
 import { SelectV2 } from "@opencode-ai/ui/v2/select-v2"
+import { Switch } from "@opencode-ai/ui/v2/switch-v2"
 import { TextareaV2 } from "@opencode-ai/ui/v2/textarea-v2"
 import { TextInputV2 } from "@opencode-ai/ui/v2/text-input-v2"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
@@ -212,17 +213,9 @@ export default function WatchersPage() {
                               {watcher.lastRun ? `Last run ${getRelativeTime(watcher.lastRun.startedAt, language.t)}` : "Never run"}
                             </span>
                             <ButtonV2 variant="ghost" disabled={!!store.running || !info().enabled} onClick={() => void run(info().id)}>{store.running === info().id ? "Running..." : "Run now"}</ButtonV2>
-                            <button
-                              type="button"
-                              role="switch"
-                              aria-checked={info().enabled}
-                              aria-label={`${info().enabled ? "Disable" : "Enable"} ${info().name}`}
-                              classList={{ "bg-v2-background-bg-interactive": info().enabled, "bg-v2-background-bg-surface": !info().enabled }}
-                              class="relative h-6 w-10 rounded-full border border-v2-border-border-base transition-colors"
-                              onClick={() => void toggle(info())}
-                            >
-                              <span classList={{ "translate-x-4": info().enabled, "translate-x-0": !info().enabled }} class="absolute left-0.5 top-0.5 size-4 rounded-full bg-white shadow transition-transform" />
-                            </button>
+                            <Switch checked={info().enabled} onChange={() => void toggle(info())} hideLabel>
+                              {`${info().enabled ? "Disable" : "Enable"} ${info().name}`}
+                            </Switch>
                           </div>
                         </div>
                       )

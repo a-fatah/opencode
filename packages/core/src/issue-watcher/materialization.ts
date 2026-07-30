@@ -266,6 +266,15 @@ export const make = Effect.fn("IssueWatcherMaterialization.make")(function* (inp
       : true
     if (!reserved) return undefined
     return yield* Effect.gen(function* () {
+    if (request.rematerialize) {
+      const previous = yield* input.db.select().from(IssueMaterializationTable)
+        .where(eq(IssueMaterializationTable.match_id, request.matchID))
+        .orderBy(desc(IssueMaterializationTable.time_created)).get().pipe(Effect.orDie)
+      if (
+        previous?.workspace_lease && ["cancelled", "failed"].includes(previous.state) && !previous.provider_started &&
+        (previous.state !== "failed" || previous.error?.startsWith("retryable:"))
+      ) yield* input.workspaces.cleanup(previous.workspace_lease).pipe(Effect.orDie)
+    }
     const staged = yield* input.db.transaction((tx) => Effect.gen(function* () {
       const match = yield* tx.select().from(IssueMatchTable).where(eq(IssueMatchTable.id, request.matchID)).get()
       if (!match) return undefined
@@ -294,6 +303,8 @@ export const make = Effect.fn("IssueWatcherMaterialization.make")(function* (inp
         (terminal.state === "failed" && !terminal.error?.startsWith("retryable:"))
       )) return undefined
       if (terminal) {
+        yield* tx.update(IssueMaterializationTable).set({ attempts: terminal.attempts + 1 })
+          .where(eq(IssueMaterializationTable.id, terminal.id)).run()
         yield* tx.update(IssueMatchSessionTable).set({ is_primary: false })
           .where(and(
             eq(IssueMatchSessionTable.match_id, match.id),
@@ -329,6 +340,9 @@ export const make = Effect.fn("IssueWatcherMaterialization.make")(function* (inp
           .innerJoin(IssueSessionClaimTable, eq(IssueMaterializationTable.id, IssueSessionClaimTable.materialization_id))
           .where(and(eq(IssueSessionClaimTable.connection_id, match.connection_id), eq(IssueSessionClaimTable.external_id, match.external_id)))
           .get().pipe(Effect.map((row) => row?.issue_materialization))
+      }
+      if (request.rematerialize && match.state === "duplicate") {
+        yield* tx.update(IssueMatchTable).set({ state: "pending", error: null }).where(eq(IssueMatchTable.id, match.id)).run()
       }
       yield* tx.insert(IssueMaterializationTable).values({
         id: materializationID,
@@ -628,7 +642,8 @@ const publishMaterialized = Effect.fnUntraced(function* (
 })
 
 function failureDetail(error: unknown, cause: Cause.Cause<unknown>) {
-  const detail = error && typeof error === "object" && "_tag" in error ? String(error._tag)
+  const detail = error && typeof error === "object" && "_tag" in error
+    ? `${String(error._tag)}${"detail" in error && typeof error.detail === "string" ? `: ${error.detail}` : ""}`
     : error instanceof Error ? error.message
     : Cause.pretty(cause)
   return `${retryable(error) ? "retryable" : "terminal"}:${detail}`

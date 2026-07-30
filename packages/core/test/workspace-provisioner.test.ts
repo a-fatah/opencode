@@ -136,7 +136,10 @@ describe("WorkspaceProvisioner", () => {
 
       yield* Effect.promise(() => Bun.write(path.join(fixture.directory, "dirty.txt"), "dirty"))
       const error = yield* service.provision(first).pipe(Effect.flip)
-      expect(error).toBeInstanceOf(WorkspaceProvisioner.NotReadyError)
+      expect(error).toMatchObject({
+        _tag: "WorkspaceProvisioner.NotReadyError",
+        detail: "Current checkout has uncommitted changes",
+      })
       yield* Effect.promise(() => fs.rm(path.join(fixture.directory, "dirty.txt")))
 
       expect((yield* service.provision(first)).location).toEqual(first.location)

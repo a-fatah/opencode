@@ -33,6 +33,8 @@ import { SessionV2 } from "@opencode-ai/core/session"
 import { EventTable } from "@opencode-ai/core/event/sql"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { SessionExecutionAttempt } from "@opencode-ai/core/session/execution-attempt"
+import { WorkspaceProvisionerTable } from "@opencode-ai/core/workspace-provisioner.sql"
+import { WorkspaceProvisioner } from "@opencode-ai/schema/workspace-provisioner"
 
 const activeOwner = Layer.succeed(IssueWatcherOwner.Service, {
   status: () => ({ status: "active" }),
@@ -1072,7 +1074,10 @@ describe("IssueWatcher", () => {
         sessionID: materialized.session_id,
         messageID: materialized.message_id,
       })
-      expect(yield* db.select().from(IssueSessionClaimTable).all().pipe(Effect.orDie)).toHaveLength(1)
+      expect(yield* db.select().from(IssueSessionClaimTable).where(and(
+        eq(IssueSessionClaimTable.connection_id, watchers[0]!.connectionID),
+        eq(IssueSessionClaimTable.external_id, issue.id),
+      )).all().pipe(Effect.orDie)).toHaveLength(1)
       expect(yield* db.select().from(SessionTable).all().pipe(Effect.orDie)).toHaveLength(1)
       expect(yield* db.select().from(SessionInputTable).all().pipe(Effect.orDie)).toHaveLength(1)
       expect(yield* db.select().from(IssueMatchSessionTable).all().pipe(Effect.orDie)).toHaveLength(1)
@@ -1082,6 +1087,88 @@ describe("IssueWatcher", () => {
         .map((event) => event.type)).toEqual([`${IssueWatcher.Event.SessionMaterialized.type}.1`])
       expect((yield* service.inbox({})).items.map((item) => item.match.id)).not.toContain(materialized.match_id)
       expect((yield* service.summary()).pending).toBe(0)
+
+      const retryMatchID = IssueMatch.ID.make("imt_materialization-retry")
+      const retryMaterializationID = IssueMatch.MaterializationID.make("imz_materialization-retry-failed")
+      const retryObservationID = IssueMatch.ObservationID.make("imo_materialization-retry")
+      const retryIssue = { ...issue, id: "retry-100", key: "DEV-RETRY" }
+      const retryRoot = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (directory) => Effect.promise(() => directory[Symbol.asyncDispose]()),
+      )
+      const retryProjectID = Project.ID.make("materialization-retry-project")
+      yield* db.insert(ProjectTable).values({
+        id: retryProjectID,
+        worktree: AbsolutePath.make(retryRoot.path),
+        sandboxes: [],
+      }).run().pipe(Effect.orDie)
+      const retryLease = WorkspaceProvisioner.Lease.make({
+        id: WorkspaceProvisioner.LeaseID.make("wpl_materialization-retry"),
+        ownerID: retryMaterializationID,
+        inputKey: retryIssue.key,
+        projectID: retryProjectID,
+        strategy: { type: "current" },
+        sourceDirectory: AbsolutePath.make(retryRoot.path),
+        location: { directory: AbsolutePath.make(retryRoot.path) },
+        ownership: "borrowed",
+      })
+      yield* db.insert(WorkspaceProvisionerTable).values({
+        id: retryLease.id,
+        owner_id: retryLease.ownerID,
+        project_id: retryLease.projectID,
+        directory: retryLease.location.directory,
+        lease: retryLease,
+        state: "reserved",
+      }).run().pipe(Effect.orDie)
+      yield* db.insert(IssueMatchTable).values({
+        id: retryMatchID,
+        watcher_id: watchers[0]!.id,
+        integration_id: watchers[0]!.integrationID,
+        connection_id: watchers[0]!.connectionID,
+        external_id: retryIssue.id,
+        external_key: retryIssue.key,
+        external_url: retryIssue.url,
+        fingerprint: IssueWatcher.fingerprint(retryIssue),
+        external_updated_at: retryIssue.updatedAt,
+        state: "duplicate",
+        project_id: retryProjectID,
+        payload: retryIssue,
+      }).run().pipe(Effect.orDie)
+      yield* db.insert(IssueMatchObservationTable).values({
+        id: retryObservationID,
+        match_id: retryMatchID,
+        run_id: runIDs[0]!,
+        fingerprint: IssueWatcher.fingerprint(retryIssue),
+        external_updated_at: retryIssue.updatedAt,
+        payload: retryIssue,
+      }).run().pipe(Effect.orDie)
+      yield* db.insert(IssueMaterializationTable).values({
+        id: retryMaterializationID,
+        match_id: retryMatchID,
+        mode: "awaiting_run",
+        project_id: retryProjectID,
+        workspace: { type: "current" },
+        workspace_lease: retryLease,
+        baseline_observation_id: retryObservationID,
+        state: "failed",
+        session_id: SessionID.make("ses_materialization-retry-failed"),
+        message_id: SessionMessage.ID.make("msg_materialization-retry-failed"),
+        error: "retryable:WorkspaceProvisioner.NotReadyError: Current checkout has uncommitted changes",
+      }).run().pipe(Effect.orDie)
+      yield* db.insert(IssueSessionClaimTable).values({
+        connection_id: watchers[0]!.connectionID,
+        external_id: retryIssue.id,
+        materialization_id: retryMaterializationID,
+      }).run().pipe(Effect.orDie)
+
+      const retried = yield* service.rematerialize(retryMatchID, { mode: "awaiting_run" })
+      expect(retried.status).toBe("created")
+      expect(yield* db.select().from(IssueMatchTable).where(eq(IssueMatchTable.id, retryMatchID)).get().pipe(Effect.orDie))
+        .toMatchObject({ state: "pending" })
+      expect(yield* db.select().from(IssueSessionClaimTable).where(and(
+        eq(IssueSessionClaimTable.connection_id, watchers[0]!.connectionID),
+        eq(IssueSessionClaimTable.external_id, retryIssue.id),
+      )).get().pipe(Effect.orDie)).toMatchObject({ materialization_id: retried.status === "created" ? retried.materializationID : undefined })
 
       const missingAttemptID = SessionExecutionAttempt.ID.make("sea_materialization-missing")
       yield* db.update(SessionInputTable).set({ claimed_attempt_id: missingAttemptID })
@@ -1147,7 +1234,10 @@ describe("IssueWatcher", () => {
       })
       expect(second.status).toBe("created")
       if (second.status !== "created") return yield* Effect.die("Expected secondary materialization")
-      expect(yield* db.select().from(IssueSessionClaimTable).all().pipe(Effect.orDie)).toHaveLength(1)
+      expect(yield* db.select().from(IssueSessionClaimTable).where(and(
+        eq(IssueSessionClaimTable.connection_id, watchers[0]!.connectionID),
+        eq(IssueSessionClaimTable.external_id, issue.id),
+      )).all().pipe(Effect.orDie)).toHaveLength(1)
       expect(yield* db.select().from(IssueMatchSessionTable)
         .where(eq(IssueMatchSessionTable.session_id, second.sessionID)).get().pipe(Effect.orDie)).toMatchObject({
           is_primary: false,

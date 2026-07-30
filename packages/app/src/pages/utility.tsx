@@ -194,7 +194,12 @@ export function InboxPage() {
                 <Filter active={store.filter === "dismissed"} onClick={() => setStore("filter", "dismissed")}>Dismissed</Filter>
               </nav>
 
-              <Show when={store.error}><p class="rounded-lg bg-v2-background-bg-base p-3 text-12-regular text-v2-text-text-danger">{store.error}</p></Show>
+              <Show when={store.error}>
+                <div role="alert" class="rounded-lg border border-v2-border-border-danger bg-v2-background-bg-surface p-3 text-v2-text-text-danger">
+                  <p class="text-12-medium">Error</p>
+                  <p class="mt-1 text-12-regular">{store.error}</p>
+                </div>
+              </Show>
               <Show when={store.items.length} fallback={<Status>No issues match this filter.</Status>}>
                 <section class="overflow-hidden rounded-xl border border-v2-border-border-base bg-v2-background-bg-base">
                   <div class="flex flex-wrap items-center gap-3 border-b border-v2-border-border-base bg-v2-background-bg-surface px-4 py-2">

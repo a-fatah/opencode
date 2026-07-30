@@ -719,7 +719,7 @@ const layer = Layer.effect(
         return yield* new MatchConflictError({ id, detail: "Issue match is not routed" })
       if (match.state === "skipped" || match.state === "dismissed")
         return yield* new MatchConflictError({ id, detail: `Issue match is ${match.state}` })
-      if (match.state === "duplicate")
+      if (match.state === "duplicate" && !rematerialize)
         return yield* new MatchConflictError({ id, detail: "Issue match is duplicate" })
       const projectID = request.projectID ?? (match.project_id ? Project.ID.make(match.project_id) : undefined)
       if (!projectID) return yield* new MatchConflictError({ id, detail: "Issue match is not routed" })

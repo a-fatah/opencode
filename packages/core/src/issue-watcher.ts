@@ -732,13 +732,14 @@ const layer = Layer.effect(
           (previous.state === "failed" && !previous.error?.startsWith("retryable:"))
         ) return yield* new MatchConflictError({ id, detail: "Issue materialization is not retryable" })
       }
-      const project = yield* projectCatalog.resolve(projectID).pipe(
+      const project = yield* projectCatalog.resolve(projectID, request.directory).pipe(
         Effect.mapError(() => new ProjectNotFoundError({ id: projectID })),
       )
       const value = yield* materialization.materialize({
         matchID: id,
         mode: request.mode,
         projectID: project.id,
+        directory: project.directory,
         ...(request.workspace ? { workspace: request.workspace } : {}),
         rematerialize,
       })
@@ -1684,7 +1685,7 @@ const layer = Layer.effect(
       approve: (id, input) => materializeResult(id, input),
       routeMatch: Effect.fn("IssueWatcher.routeMatch")(function* (id, input) {
         const match = yield* requireMatch(id)
-        yield* projectCatalog.resolve(input.projectID).pipe(
+        yield* projectCatalog.resolve(input.projectID, input.directory).pipe(
           Effect.mapError(() => new ProjectNotFoundError({ id: input.projectID })),
         )
         if (!input.persistMapping) {

@@ -14,7 +14,10 @@ import { ProjectDirectoryTable, ProjectTable } from "./sql"
 
 export interface Interface {
   readonly list: () => Effect.Effect<ReadonlyArray<IssueWatcher.ProjectRoutingSnapshot>>
-  readonly resolve: (projectID: WorkspaceProvisioner.ResolvedProject["id"]) => Effect.Effect<WorkspaceProvisioner.ResolvedProject, ResolutionError>
+  readonly resolve: (
+    projectID: WorkspaceProvisioner.ResolvedProject["id"],
+    directory?: AbsolutePath,
+  ) => Effect.Effect<WorkspaceProvisioner.ResolvedProject, ResolutionError>
 }
 
 export class ResolutionError extends Schema.TaggedErrorClass<ResolutionError>()("ProjectRoutingCatalog.ResolutionError", {
@@ -29,10 +32,21 @@ const layer = Layer.effect(
     const db = (yield* Database.Service).db
     const git = yield* Git.Service
 
-    const resolve = Effect.fn("ProjectRoutingCatalog.resolve")(function* (projectID: WorkspaceProvisioner.ResolvedProject["id"]) {
+    const resolve = Effect.fn("ProjectRoutingCatalog.resolve")(function* (
+      projectID: WorkspaceProvisioner.ResolvedProject["id"],
+      selectedDirectory?: AbsolutePath,
+    ) {
       const project = yield* db.select().from(ProjectTable).where(eq(ProjectTable.id, projectID)).get().pipe(Effect.orDie)
       if (!project || project.id === "global") return yield* new ResolutionError({ detail: "Selected project is not registered" })
-      const directory = AbsolutePath.make(project.worktree)
+      const knownDirectories = [
+        project.worktree,
+        ...project.sandboxes,
+        ...(yield* db.select({ directory: ProjectDirectoryTable.directory }).from(ProjectDirectoryTable)
+          .where(eq(ProjectDirectoryTable.project_id, projectID)).all().pipe(Effect.orDie)).map((item) => item.directory),
+      ]
+      const directory = selectedDirectory ?? AbsolutePath.make(project.worktree)
+      if (!knownDirectories.includes(directory))
+        return yield* new ResolutionError({ detail: "Selected checkout is not registered for this project" })
       const repository = yield* git.repo.discover(directory)
       if (!project.vcs) {
         if (repository) return yield* new ResolutionError({ detail: "Non-Git project selection resolves to a Git checkout" })

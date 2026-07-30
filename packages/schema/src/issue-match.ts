@@ -7,7 +7,7 @@ import { Issue } from "./issue"
 import { IssueWatcher } from "./issue-watcher"
 import { Location } from "./location"
 import { Project } from "./project"
-import { DateTimeUtcFromMillis, NonNegativeInt, optional, statics } from "./schema"
+import { AbsolutePath, DateTimeUtcFromMillis, NonNegativeInt, optional, statics } from "./schema"
 import { SessionID } from "./session-id"
 import { SessionMessage } from "./session-message"
 import { SessionExecutionAttempt } from "./session-execution-attempt"
@@ -105,6 +105,7 @@ export const Materialization = Schema.Struct({
   matchID: ID,
   mode: Schema.Literals(["awaiting_run", "run"]),
   projectID: Project.ID,
+  sourceDirectory: optional(AbsolutePath),
   workspace: Schema.suspend(() => IssueWatcher.Workspace),
   resolvedLocation: optional(Location.Ref),
   workspaceLease: optional(WorkspaceProvisioner.Lease),

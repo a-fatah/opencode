@@ -8,7 +8,7 @@ import { Credential } from "./credential"
 import { IssueMatch } from "./issue-match"
 import { Issue } from "./issue"
 import { Project } from "./project"
-import { DateTimeUtcFromMillis, NonNegativeInt, optional, statics } from "./schema"
+import { AbsolutePath, DateTimeUtcFromMillis, NonNegativeInt, optional, statics } from "./schema"
 import { SessionID } from "./session-id"
 import { WorkspaceProvisioner } from "./workspace-provisioner"
 
@@ -271,6 +271,7 @@ export interface MaterializeInput extends Schema.Schema.Type<typeof MaterializeI
 export const MaterializeInput = Schema.Struct({
   mode: Schema.Literals(["run", "awaiting_run"]),
   projectID: optional(Project.ID),
+  directory: optional(AbsolutePath),
   workspace: optional(Workspace),
 }).annotate({ identifier: "IssueWatcher.MaterializeInput" })
 
@@ -289,6 +290,7 @@ export type MaterializeResult = typeof MaterializeResult.Type
 export interface RouteInput extends Schema.Schema.Type<typeof RouteInput> {}
 export const RouteInput = Schema.Struct({
   projectID: Project.ID,
+  directory: optional(AbsolutePath),
   persistMapping: optional(Schema.Boolean),
 }).annotate({ identifier: "IssueWatcher.RouteInput" })
 

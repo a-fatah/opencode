@@ -13,7 +13,21 @@ import { getRelativeTime } from "@/utils/time"
 import { issueWatcherApi, watcherConnectionSource, type InboxItem, type InboxSummary } from "./watchers/api"
 import { authExpiredMessage, inboxAttentionCount, inboxBulkActionSupports, inboxQuery, selectableInboxItem, watcherAuthExpired, type InboxBulkAction, type InboxFilter } from "./watchers/logic"
 
-type InboxProject = { readonly id: string; readonly name?: string; readonly worktree: string }
+type InboxProject = { readonly id: string; readonly name?: string; readonly worktree: string; readonly sandboxes: readonly string[] }
+type InboxProjectTarget = { readonly projectID: string; readonly directory: string; readonly label: string }
+
+async function projectTargets(serverSdk: ReturnType<typeof useServerSDK>, projects: readonly InboxProject[]) {
+  return (await Promise.all(projects.map(async (project) => {
+    const known = await serverSdk().api.project.directories({ projectID: project.id, location: { directory: project.worktree } })
+      .then((items) => items.map((item) => item.directory))
+      .catch(() => [] as string[])
+    return [...new Set([project.worktree, ...project.sandboxes, ...known])].map((directory) => ({
+      projectID: project.id,
+      directory,
+      label: project.name && directory === project.worktree ? project.name : directory,
+    }))
+  }))).flat()
+}
 
 export function InboxPage() {
   const serverSdk = useServerSDK()
@@ -34,14 +48,13 @@ export function InboxPage() {
     () => `${serverSdk().scope}:${store.filter}`,
     async () => {
       const api = issueWatcherApi(serverSdk())
-      const [sources, watchers, page, summary, projects] = await Promise.all([
+      const [sources, watchers, page, summary] = await Promise.all([
         api.sources(),
         api.list(),
         api.inbox({ ...inboxQuery(store.filter), limit: 50 }),
         api.inboxSummary(),
-        serverSdk().api.project.list(),
       ])
-      return { sources, watchers, page, summary, projects: projects as readonly InboxProject[] }
+      return { sources, watchers, page, summary }
     },
   )
   const watchersHref = () => `/server/${encodeURIComponent(params.serverKey)}/watchers`
@@ -125,8 +138,10 @@ export function InboxPage() {
       .catch((error: Error) => setStore("error", error.message))
     setStore("busy", "")
   }
-  const pickProject = (item: InboxItem) => {
-    void dialog.push(() => <RouteInboxDialog item={item} projects={data()?.projects ?? []} onComplete={refresh} onOpenSession={openSession} />)
+  const pickProject = async (item: InboxItem) => {
+    const projects = await serverSdk().api.project.list() as readonly InboxProject[]
+    const targets = await projectTargets(serverSdk, projects)
+    void dialog.push(() => <RouteInboxDialog item={item} projects={targets} onComplete={refresh} onOpenSession={openSession} />)
   }
   const inspectDuplicate = (item: InboxItem) => {
     void dialog.push(() => <DuplicateInboxDialog item={item} onComplete={refresh} onOpenSession={openSession} />)
@@ -262,6 +277,7 @@ function InboxRow(props: {
         <span class="rounded-full bg-v2-background-bg-surface px-2 py-1 text-11-medium capitalize text-v2-text-text-muted">{state()}</span>
         <Show when={retryable()}>
           <span class="rounded-full bg-v2-background-bg-surface px-2 py-1 text-11-medium text-v2-text-text-danger">Materialization failed</span>
+          <ButtonV2 variant="outline" disabled={props.busy} onClick={props.onRoute}>Pick project</ButtonV2>
           <ButtonV2 variant="outline" disabled={props.busy} onClick={() => props.onAction("retry")}>Retry creation</ButtonV2>
         </Show>
         <Show when={state() === "unrouted"}>
@@ -285,26 +301,31 @@ function InboxRow(props: {
 
 function RouteInboxDialog(props: {
   item: InboxItem
-  projects: readonly InboxProject[]
+  projects: readonly InboxProjectTarget[]
   onComplete: () => Promise<unknown>
   onOpenSession: (sessionID: string) => void
 }) {
   const serverSdk = useServerSDK()
   const dialog = useDialog()
+  const selectedDirectory = props.item.materialization?.sourceDirectory
   const [store, setStore] = createStore({
-    projectID: props.item.suggestion?.id ?? "",
+    target: (props.projects.find((project) => project.directory === selectedDirectory) ??
+      props.projects.find((project) => project.projectID === (props.item.suggestion?.id ?? props.item.project?.id)) ??
+      props.projects[0] ?? null) as InboxProjectTarget | null,
     persistMapping: false,
     busy: false,
     error: "",
   })
   const submit = async (mode: "run" | "awaiting_run" | "skip") => {
-    if (!store.projectID && mode !== "skip") return
+    if (!store.target && mode !== "skip") return
     setStore({ busy: true, error: "" })
     const api = issueWatcherApi(serverSdk())
     const request = mode === "skip"
       ? api.skip({ matchID: props.item.match.id })
-      : api.routeMatch({ matchID: props.item.match.id, projectID: store.projectID, persistMapping: store.persistMapping })
-          .then(() => api.approve({ matchID: props.item.match.id, mode }))
+      : api.routeMatch({ matchID: props.item.match.id, projectID: store.target!.projectID, directory: store.target!.directory, persistMapping: store.persistMapping })
+          .then(() => props.item.materialization?.state === "failed"
+            ? api.rematerialize({ matchID: props.item.match.id, mode, projectID: store.target!.projectID, directory: store.target!.directory })
+            : api.approve({ matchID: props.item.match.id, mode, projectID: store.target!.projectID, directory: store.target!.directory }))
     await request
       .then(async (result) => {
         dialog.close()
@@ -322,9 +343,9 @@ function RouteInboxDialog(props: {
           {(suggestion) => <p class="rounded-lg bg-v2-background-bg-surface p-3 text-12-regular text-v2-text-text-muted">Suggested: <span class="text-v2-text-text-strong">{suggestion().name}</span><Show when={props.item.match.routeReason}> because {props.item.match.routeReason}</Show></p>}
         </Show>
         <label class="flex flex-col gap-2 text-12-medium text-v2-text-text-muted">Project
-          <select class="rounded-lg border border-v2-border-border-base bg-v2-background-bg-base px-3 py-2 text-v2-text-text-strong" value={store.projectID} disabled={store.busy} onChange={(event) => setStore("projectID", event.currentTarget.value)}>
+          <select class="rounded-lg border border-v2-border-border-base bg-v2-background-bg-base px-3 py-2 text-v2-text-text-strong" value={store.target ? `${store.target.projectID}\0${store.target.directory}` : ""} disabled={store.busy} onChange={(event) => setStore("target", props.projects.find((project) => `${project.projectID}\0${project.directory}` === event.currentTarget.value) ?? null)}>
             <option value="">Select a project</option>
-            <For each={props.projects.filter((project) => project.id)}>{(project) => <option value={project.id}>{project.name ?? project.worktree}</option>}</For>
+            <For each={props.projects.filter((project) => project.projectID)}>{(project) => <option value={`${project.projectID}\0${project.directory}`}>{project.label}</option>}</For>
           </select>
         </label>
         <label class="flex items-center gap-2 text-12-regular text-v2-text-text-muted"><input type="checkbox" checked={store.persistMapping} disabled={store.busy} onChange={(event) => setStore("persistMapping", event.currentTarget.checked)} /> Use this route for future matching issues</label>
@@ -333,8 +354,8 @@ function RouteInboxDialog(props: {
       <DialogFooter>
         <ButtonV2 variant="neutral" disabled={store.busy} onClick={() => dialog.close()}>Cancel</ButtonV2>
         <ButtonV2 variant="ghost" disabled={store.busy} onClick={() => void submit("skip")}>Skip</ButtonV2>
-        <ButtonV2 variant="outline" disabled={store.busy || !store.projectID} onClick={() => void submit("awaiting_run")}>Awaiting run</ButtonV2>
-        <ButtonV2 variant="contrast" disabled={store.busy || !store.projectID} onClick={() => void submit("run")}>Create & run</ButtonV2>
+        <ButtonV2 variant="outline" disabled={store.busy || !store.target} onClick={() => void submit("awaiting_run")}>Awaiting run</ButtonV2>
+        <ButtonV2 variant="contrast" disabled={store.busy || !store.target} onClick={() => void submit("run")}>Create & run</ButtonV2>
       </DialogFooter>
     </Dialog>
   )

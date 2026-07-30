@@ -606,7 +606,12 @@ export function make(options: ClientOptions) {
           {
             method: "POST",
             path: `/api/issue-watcher/inbox/${encodeURIComponent(input.matchID)}/approve`,
-            body: { mode: input["mode"], projectID: input["projectID"], workspace: input["workspace"] },
+            body: {
+              mode: input["mode"],
+              projectID: input["projectID"],
+              directory: input["directory"],
+              workspace: input["workspace"],
+            },
             successStatus: 200,
             declaredStatuses: [404, 409, 401, 400],
             empty: false,
@@ -618,7 +623,11 @@ export function make(options: ClientOptions) {
           {
             method: "POST",
             path: `/api/issue-watcher/inbox/${encodeURIComponent(input.matchID)}/route`,
-            body: { projectID: input["projectID"], persistMapping: input["persistMapping"] },
+            body: {
+              projectID: input["projectID"],
+              directory: input["directory"],
+              persistMapping: input["persistMapping"],
+            },
             successStatus: 204,
             declaredStatuses: [404, 409, 401, 400],
             empty: true,
@@ -652,7 +661,12 @@ export function make(options: ClientOptions) {
           {
             method: "POST",
             path: `/api/issue-watcher/inbox/${encodeURIComponent(input.matchID)}/rematerialize`,
-            body: { mode: input["mode"], projectID: input["projectID"], workspace: input["workspace"] },
+            body: {
+              mode: input["mode"],
+              projectID: input["projectID"],
+              directory: input["directory"],
+              workspace: input["workspace"],
+            },
             successStatus: 200,
             declaredStatuses: [404, 409, 401, 400],
             empty: false,

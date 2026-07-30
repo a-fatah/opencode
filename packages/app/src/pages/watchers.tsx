@@ -6,7 +6,7 @@ import { TextInputV2 } from "@opencode-ai/ui/v2/text-input-v2"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { A, useNavigate, useParams } from "@solidjs/router"
 import { Popover } from "@kobalte/core/popover"
-import { createEffect, createMemo, createResource, For, onCleanup, onMount, Show, type JSX } from "solid-js"
+import { createEffect, createMemo, createResource, For, onCleanup, onMount, Show, untrack, type JSX } from "solid-js"
 import { createStore, reconcile, type SetStoreFunction } from "solid-js/store"
 import { DialogConnectSource } from "@/components/settings-v2/dialog-connect-source"
 import type { IntegrationSource } from "@/components/settings-v2/integrations-logic"
@@ -18,23 +18,29 @@ import {
   authExpiredMessage,
   canPreview,
   canSave,
+  composeMetadataScope,
   criteriaSummary,
   emptyWatcherDraft,
   hasPreviewCriteria,
   inboxAttentionCount,
+  metadataSyncState,
   outcomeLabel,
   routeRungs,
   routingSummary,
+  retainGlobalMetadata,
   splitValues,
+  withUnavailableOptions,
   type WatcherDraft,
 } from "./watchers/logic"
 import { issueWatcherApi, watcherConnectionSource, type InboxSummary, type WatcherHistoryEntry, type WatcherSummary } from "./watchers/api"
+import { createMetadataPolling } from "./watchers/metadata-polling"
 
 type WatcherToggle = { id: string; enabled: boolean }
 type PreviewMatch = IssueWatchersPreviewOutput["matches"][number]
 type PreviewOutput = IssueWatchersPreviewOutput
 type PreviewInput = IssueWatchersPreviewInput
-type Metadata = IssueWatchersMetadataOutput
+type MetadataResult = IssueWatchersMetadataOutput
+type Metadata = MetadataResult["metadata"]
 type MetadataOption = Metadata["users"][number]
 type EditorState = {
   draft: WatcherDraft
@@ -49,9 +55,12 @@ type EditorState = {
   historyCursor: string | undefined
   historyLoading: boolean
   historyError: string
-  metadata: Metadata | undefined
+  metadataResult: MetadataResult | undefined
   metadataLoading: boolean
   metadataError: string
+  metadataRefresh: number
+  metadataPolling: boolean
+  metadataResyncing: boolean
 }
 type EditorSetter = SetStoreFunction<EditorState>
 
@@ -223,9 +232,12 @@ export function WatcherEditorPage() {
     historyCursor: undefined,
     historyLoading: false,
     historyError: "",
-    metadata: undefined,
+    metadataResult: undefined,
     metadataLoading: false,
     metadataError: "",
+    metadataRefresh: 0,
+    metadataPolling: false,
+    metadataResyncing: false,
   })
   const [loaded, { refetch: refetchEditor }] = createResource(
     () => `${serverSdk().scope}:${params.watcherID}`,
@@ -271,41 +283,80 @@ export function WatcherEditorPage() {
   )
   const connectedSources = createMemo(() => (loaded()?.sources ?? []).filter((source) => source.connection))
   const selectedSource = createMemo(() => connectedSources().find((source) => source.integration.id === store.draft.integrationID))
-  createEffect(() => {
+  let metadataConnection = ""
+  let metadataQuery = ""
+  createMetadataPolling<MetadataResult>({
+    input: () => {
+      const scope = serverSdk().scope
+      const integrationID = store.draft.integrationID
+      const connectionID = store.draft.connectionID
+      const issueProjects = [...store.draft.criteria.issueProjects]
+      const refresh = store.metadataRefresh
+      if (integrationID !== "jira" || !connectionID) {
+        untrack(() => setStore({ metadataResult: undefined, metadataLoading: false, metadataError: "", metadataPolling: false, metadataResyncing: false }))
+        return
+      }
+      return { scope, integrationID, connectionID, issueProjects, refresh }
+    },
+    retained: () => store.metadataResult,
+    request: (input, signal) => {
+      const sdk = untrack(serverSdk)
+      return sdk.nextApi.issueWatchers.metadata(
+        { integrationID: input.integrationID, connectionID: input.connectionID, issueProjects: input.issueProjects },
+        { signal },
+      )
+    },
+    pending: (result) => result.syncing || result.missingProjectKeys.length > 0,
+    onCycle: (input) => {
+      const connection = `${input.scope}:${input.integrationID}:${input.connectionID}`
+      if (connection !== metadataConnection) {
+        metadataConnection = connection
+        metadataQuery = ""
+        setStore({ metadataResult: undefined, metadataLoading: false, metadataError: "", metadataPolling: false, metadataResyncing: false })
+      }
+      const query = `${connection}:${JSON.stringify(input.issueProjects)}`
+      if (query === metadataQuery) return
+      metadataQuery = query
+      const previous = store.metadataResult
+      if (previous) {
+        setStore("metadataResult", {
+          ...previous,
+          syncing: false,
+          missingProjectKeys: [...input.issueProjects],
+          metadata: retainGlobalMetadata(previous.metadata),
+        })
+      }
+    },
+    onLoading: (loading) => setStore("metadataLoading", loading),
+    onError: (error) => setStore("metadataError", error),
+    onResult: (result, previous, pending) => setStore("metadataResult", {
+      ...result,
+      metadata: composeMetadataScope(previous?.metadata, result.metadata, pending),
+    }),
+    onPolling: (polling) => setStore("metadataPolling", polling),
+    onDeadline: () => setStore("metadataError", "Jira data is still syncing. Resync to try again."),
+  })
+  const resyncMetadata = async () => {
+    const result = store.metadataResult
+    if (metadataSyncState({ result, error: store.metadataError, resyncing: store.metadataResyncing }).refreshing) return
+    const sdk = serverSdk()
     const integrationID = store.draft.integrationID
     const connectionID = store.draft.connectionID
-    const issueProjects = [...store.draft.criteria.issueProjects]
-    JSON.stringify(issueProjects)
-    if (integrationID !== "jira" || !connectionID) {
-      setStore({ metadata: undefined, metadataLoading: false, metadataError: "" })
-      return
-    }
-    const controller = new AbortController()
-    const timer = window.setTimeout(async () => {
-      setStore({ metadataLoading: true, metadataError: "" })
-      await serverSdk().nextApi.issueWatchers.metadata(
-        { integrationID, connectionID, issueProjects },
-        { signal: controller.signal },
-      )
-        .then((metadata) => {
-          const assigneeID = store.draft.criteria.assignee && store.draft.criteria.assignee !== "me"
-            ? store.draft.criteria.assignee.id
-            : undefined
-          const selected = assigneeID && !metadata.users.some((user) => user.id === assigneeID)
-            ? store.metadata?.users.find((user) => user.id === assigneeID)
-            : undefined
-          setStore("metadata", selected ? { ...metadata, users: [...metadata.users, selected] } : metadata)
-        })
-        .catch((error: Error) => {
-          if (error.name !== "AbortError") setStore("metadataError", error.message)
-        })
-      if (!controller.signal.aborted) setStore("metadataLoading", false)
-    }, 300)
-    onCleanup(() => {
-      window.clearTimeout(timer)
-      controller.abort()
+    setStore({ metadataResyncing: true, metadataError: "" })
+    await sdk.nextApi.issueWatchers.syncMetadata({
+      integrationID,
+      connectionID,
+    }).then((status) => {
+      if (sdk.scope !== serverSdk().scope || integrationID !== store.draft.integrationID || connectionID !== store.draft.connectionID) return
+      if (store.metadataResult) setStore("metadataResult", { ...store.metadataResult, ...status })
+      setStore("metadataResyncing", false)
+      setStore("metadataRefresh", (value) => value + 1)
+    }).catch((error: Error) => {
+      if (sdk.scope === serverSdk().scope && integrationID === store.draft.integrationID && connectionID === store.draft.connectionID) {
+        setStore({ metadataError: error.message, metadataResyncing: false })
+      }
     })
-  })
+  }
   const refreshHistory = async () => {
     if (isNew()) return
     setStore("historyError", "")
@@ -453,9 +504,9 @@ export function WatcherEditorPage() {
 
         <div class="mt-5 grid min-h-0 min-w-0 flex-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.62fr)]">
           <section class="min-w-0 rounded-xl border border-v2-border-border-base bg-v2-background-bg-base p-5 md:p-6">
-            <Show when={store.section === "criteria"}><CriteriaEditor store={store} setStore={setStore} sources={connectedSources()} selected={selectedSource()} onSource={chooseSource} metadata={store.metadata} metadataLoading={store.metadataLoading} metadataError={store.metadataError || undefined} /></Show>
-            <Show when={store.section === "routing"}><RoutingEditor store={store} setStore={setStore} metadata={store.metadata} /></Show>
-            <Show when={store.section === "action"}><ActionEditor store={store} setStore={setStore} concurrentRuns={loaded()?.settings.concurrentRuns ?? 1} metadata={store.metadata} /></Show>
+            <Show when={store.section === "criteria"}><CriteriaEditor store={store} setStore={setStore} sources={connectedSources()} selected={selectedSource()} onSource={chooseSource} metadataResult={store.metadataResult} metadataLoading={store.metadataLoading} metadataError={store.metadataError || undefined} metadataPolling={store.metadataPolling} metadataResyncing={store.metadataResyncing} onResync={resyncMetadata} /></Show>
+            <Show when={store.section === "routing"}><RoutingEditor store={store} setStore={setStore} metadata={store.metadataResult?.metadata} metadataLoading={metadataGlobalLoading(store.metadataResult, store.metadataLoading)} projectLoading={metadataProjectLoading(store.metadataResult, store.draft.criteria.issueProjects)} /></Show>
+            <Show when={store.section === "action"}><ActionEditor store={store} setStore={setStore} concurrentRuns={loaded()?.settings.concurrentRuns ?? 1} metadata={store.metadataResult?.metadata} projectLoading={metadataProjectLoading(store.metadataResult, store.draft.criteria.issueProjects)} /></Show>
           </section>
           <PreviewPane section={store.section} preview={store.preview} busy={store.previewBusy} error={store.previewError} draft={store.draft} />
         </div>
@@ -466,28 +517,32 @@ export function WatcherEditorPage() {
   )
 }
 
-function CriteriaEditor(props: { store: EditorState; setStore: EditorSetter; sources: IntegrationSource[]; selected?: IntegrationSource; onSource: (source: IntegrationSource | null) => void; metadata?: Metadata; metadataLoading: boolean; metadataError?: string }) {
+function CriteriaEditor(props: { store: EditorState; setStore: EditorSetter; sources: IntegrationSource[]; selected?: IntegrationSource; onSource: (source: IntegrationSource | null) => void; metadataResult?: MetadataResult; metadataLoading: boolean; metadataError?: string; metadataPolling: boolean; metadataResyncing: boolean; onResync: () => void }) {
   const jira = () => props.store.draft.integrationID === "jira"
+  const metadata = () => props.metadataResult?.metadata
+  const globalLoading = () => metadataGlobalLoading(props.metadataResult, props.metadataLoading)
+  const projectLoading = () => metadataProjectLoading(props.metadataResult, props.store.draft.criteria.issueProjects)
   return (
     <EditorSection title="Criteria" description="Describe the issues this watcher should match.">
       <Field label="Source">
         <SelectV2 appearance="large" options={props.sources} current={props.selected} value={(source) => source.integration.id} label={(source) => source.integration.name} onSelect={props.onSource} />
       </Field>
-      <Show when={props.metadataError}><p class="text-12-regular text-v2-text-text-danger">Unable to load Jira choices: {props.metadataError}</p></Show>
+      <Show when={jira()}><MetadataSyncStatus result={props.metadataResult} loading={props.metadataLoading} error={props.metadataError} polling={props.metadataPolling} resyncing={props.metadataResyncing} onResync={props.onResync} /></Show>
       <Field label="Issue projects" hint={jira() ? "Leave blank to watch all visible Jira projects." : "Comma-separated provider project keys. Leave blank for all."}>
         <Show when={jira()} fallback={<TextInputV2 appearance="large" value={props.store.draft.criteria.issueProjects.join(", ")} onChange={(event) => props.setStore("draft", "criteria", "issueProjects", splitValues(event.currentTarget.value))} />}>
-          <MetadataPicker multiple placeholder="Select Jira projects" loading={props.metadataLoading} options={(props.metadata?.projects ?? []).map((project) => ({ id: project.key, name: project.name, imageUrl: project.imageUrl, detail: project.key }))} selected={props.store.draft.criteria.issueProjects} onChange={(values) => props.setStore("draft", "criteria", "issueProjects", values)} />
+          <MetadataPicker multiple placeholder="Select Jira projects" loading={globalLoading()} options={(metadata()?.projects ?? []).map((project) => ({ id: project.key, name: project.name, imageUrl: project.imageUrl, detail: project.key }))} selected={props.store.draft.criteria.issueProjects} onChange={(values) => props.setStore("draft", "criteria", "issueProjects", values)} />
         </Show>
       </Field>
       <Field label="Assignee">
         <Show when={jira()} fallback={<TextInputV2 appearance="large" placeholder="me or provider assignee ID" value={props.store.draft.criteria.assignee === "me" ? "me" : props.store.draft.criteria.assignee?.id ?? ""} onChange={(event) => props.setStore("draft", "criteria", "assignee", event.currentTarget.value === "me" ? "me" : event.currentTarget.value ? { id: event.currentTarget.value } : undefined)} />}>
-          <MetadataPicker placeholder="Select Jira assignee" loading={props.metadataLoading} options={[{ id: "me", name: "Current Jira user" }, ...(props.metadata?.users ?? [])]} selected={props.store.draft.criteria.assignee === "me" ? ["me"] : props.store.draft.criteria.assignee ? [props.store.draft.criteria.assignee.id] : []} onChange={(values) => props.setStore("draft", "criteria", "assignee", values[0] === "me" ? "me" : values[0] ? { id: values[0] } : undefined)} />
+          <MetadataPicker placeholder="Select Jira assignee" loading={projectLoading()} options={[{ id: "me", name: "Current Jira user" }, ...(metadata()?.users ?? [])]} selected={props.store.draft.criteria.assignee === "me" ? ["me"] : props.store.draft.criteria.assignee ? [props.store.draft.criteria.assignee.id] : []} onChange={(values) => props.setStore("draft", "criteria", "assignee", values[0] === "me" ? "me" : values[0] ? { id: values[0] } : undefined)} />
         </Show>
       </Field>
       <div class="grid gap-4 md:grid-cols-2">
-        <Field label="Labels"><Show when={jira()} fallback={<TextInputV2 appearance="large" value={props.store.draft.criteria.labels?.join(", ") ?? ""} onChange={(event) => props.setStore("draft", "criteria", "labels", splitValues(event.currentTarget.value))} />}><MetadataPicker multiple placeholder="Select Jira labels" loading={props.metadataLoading} options={(props.metadata?.labels ?? []).map((label) => ({ id: label, name: label }))} selected={props.store.draft.criteria.labels ?? []} onChange={(values) => props.setStore("draft", "criteria", "labels", values.length ? values : undefined)} /></Show></Field>
-        <Field label="Statuses"><Show when={jira()} fallback={<TextInputV2 appearance="large" value={props.store.draft.criteria.statuses?.join(", ") ?? ""} onChange={(event) => props.setStore("draft", "criteria", "statuses", splitValues(event.currentTarget.value))} />}><MetadataPicker multiple placeholder={props.store.draft.criteria.issueProjects.length ? "Select Jira statuses" : "Select projects to load statuses"} loading={props.metadataLoading} options={(props.metadata?.statuses ?? []).map((status) => ({ ...status, id: status.name }))} selected={props.store.draft.criteria.statuses ?? []} onChange={(values) => props.setStore("draft", "criteria", "statuses", values.length ? values : undefined)} /></Show></Field>
+        <Field label="Labels"><Show when={jira()} fallback={<TextInputV2 appearance="large" value={props.store.draft.criteria.labels?.join(", ") ?? ""} onChange={(event) => props.setStore("draft", "criteria", "labels", splitValues(event.currentTarget.value))} />}><MetadataPicker multiple placeholder="Select Jira labels" loading={globalLoading()} options={(metadata()?.labels ?? []).map((label) => ({ id: label, name: label }))} selected={props.store.draft.criteria.labels ?? []} onChange={(values) => props.setStore("draft", "criteria", "labels", values.length ? values : undefined)} /></Show></Field>
+        <Field label="Statuses"><Show when={jira()} fallback={<TextInputV2 appearance="large" value={props.store.draft.criteria.statuses?.join(", ") ?? ""} onChange={(event) => props.setStore("draft", "criteria", "statuses", splitValues(event.currentTarget.value))} />}><MetadataPicker multiple placeholder={props.store.draft.criteria.issueProjects.length ? "Select Jira statuses" : "Select projects to load statuses"} loading={projectLoading()} options={(metadata()?.statuses ?? []).map((status) => ({ ...status, id: status.name }))} selected={props.store.draft.criteria.statuses ?? []} onChange={(values) => props.setStore("draft", "criteria", "statuses", values.length ? values : undefined)} /></Show></Field>
       </div>
+      <Show when={jira() && props.store.draft.criteria.issueProjects.length === 0}><p class="text-11-regular text-v2-text-text-muted">Select Jira projects to load their assignees, statuses, components, and issue types. Current Jira user remains available without a project.</p></Show>
       <Check checked={props.store.draft.criteria.watchUpdates} onChange={(checked) => props.setStore("draft", "criteria", "watchUpdates", checked)} label="Also watch issues that change after they matched" />
       <details class="rounded-lg border border-v2-border-border-base p-4">
         <summary class="cursor-pointer text-13-medium text-v2-text-text-strong">Advanced provider query</summary>
@@ -500,7 +555,7 @@ function CriteriaEditor(props: { store: EditorState; setStore: EditorSetter; sou
   )
 }
 
-function RoutingEditor(props: { store: EditorState; setStore: EditorSetter; metadata?: Metadata }) {
+function RoutingEditor(props: { store: EditorState; setStore: EditorSetter; metadata?: Metadata; metadataLoading: boolean; projectLoading: boolean }) {
   const addMapping = () => props.setStore("draft", "routing", "mappings", (items) => [...items, { key: { type: "label" as const, value: "" }, projectID: "" }])
   return (
     <EditorSection title="Routing" description="Routes are evaluated in order. The first matching rung wins.">
@@ -510,12 +565,12 @@ function RoutingEditor(props: { store: EditorState; setStore: EditorSetter; meta
       <Field label="Mappings">
         <div class="flex flex-col gap-2">
           <For each={props.store.draft.routing.mappings}>
-            {(mapping, index) => <div class="grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(120px,0.65fr)_minmax(0,1fr)_minmax(0,1fr)_auto]"><SelectV2 class="!w-full !min-w-0" appearance="base" options={[...mappingTypes]} current={mapping.key.type} onSelect={(type) => type && props.setStore("draft", "routing", "mappings", index(), "key", "type", type)} /><Show when={props.store.draft.integrationID === "jira"} fallback={<TextInputV2 class="!w-full !min-w-0" value={mapping.key.value} placeholder="Match value" onInput={(event) => props.setStore("draft", "routing", "mappings", index(), "key", "value", event.currentTarget.value)} />}><MetadataPicker placeholder="Select Jira value" options={mappingOptions(mapping.key.type, props.metadata)} selected={mapping.key.value ? [mapping.key.value] : []} onChange={(values) => props.setStore("draft", "routing", "mappings", index(), "key", "value", values[0] ?? "")} /></Show><TextInputV2 class="!w-full !min-w-0" value={mapping.projectID} placeholder="OpenCode project ID" onInput={(event) => props.setStore("draft", "routing", "mappings", index(), "projectID", event.currentTarget.value)} /><div class="sm:col-span-2 sm:justify-self-end xl:col-span-1"><ButtonV2 variant="ghost" onClick={() => props.setStore("draft", "routing", "mappings", (items) => items.filter((_, itemIndex) => itemIndex !== index()))}>Remove</ButtonV2></div></div>}
+            {(mapping, index) => <div class="grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(120px,0.65fr)_minmax(0,1fr)_minmax(0,1fr)_auto]"><SelectV2 class="!w-full !min-w-0" appearance="base" options={[...mappingTypes]} current={mapping.key.type} onSelect={(type) => type && props.setStore("draft", "routing", "mappings", index(), "key", "type", type)} /><Show when={props.store.draft.integrationID === "jira"} fallback={<TextInputV2 class="!w-full !min-w-0" value={mapping.key.value} placeholder="Match value" onInput={(event) => props.setStore("draft", "routing", "mappings", index(), "key", "value", event.currentTarget.value)} />}><MetadataPicker placeholder="Select Jira value" loading={mapping.key.type === "component" ? props.projectLoading : props.metadataLoading} options={mappingOptions(mapping.key.type, props.metadata)} selected={mapping.key.value ? [mapping.key.value] : []} onChange={(values) => props.setStore("draft", "routing", "mappings", index(), "key", "value", values[0] ?? "")} /></Show><TextInputV2 class="!w-full !min-w-0" value={mapping.projectID} placeholder="OpenCode project ID" onInput={(event) => props.setStore("draft", "routing", "mappings", index(), "projectID", event.currentTarget.value)} /><div class="sm:col-span-2 sm:justify-self-end xl:col-span-1"><ButtonV2 variant="ghost" onClick={() => props.setStore("draft", "routing", "mappings", (items) => items.filter((_, itemIndex) => itemIndex !== index()))}>Remove</ButtonV2></div></div>}
           </For>
           <ButtonV2 variant="outline" icon="plus-small" onClick={addMapping}>Add mapping</ButtonV2>
         </div>
       </Field>
-      <Field label="Repository field" hint="Optional issue field containing the repository name."><Show when={props.store.draft.integrationID === "jira"} fallback={<TextInputV2 appearance="large" value={props.store.draft.routing.repoField?.fieldName ?? ""} onInput={(event) => props.setStore("draft", "routing", "repoField", event.currentTarget.value ? { fieldName: event.currentTarget.value } : undefined)} />}><MetadataPicker placeholder="Select Jira field" options={(props.metadata?.fields ?? []).map((field) => ({ ...field, id: field.name }))} selected={props.store.draft.routing.repoField ? [props.store.draft.routing.repoField.fieldName] : []} onChange={(values) => props.setStore("draft", "routing", "repoField", values[0] ? { fieldName: values[0] } : undefined)} /></Show></Field>
+      <Field label="Repository field" hint="Optional issue field containing the repository name."><Show when={props.store.draft.integrationID === "jira"} fallback={<TextInputV2 appearance="large" value={props.store.draft.routing.repoField?.fieldName ?? ""} onInput={(event) => props.setStore("draft", "routing", "repoField", event.currentTarget.value ? { fieldName: event.currentTarget.value } : undefined)} />}><MetadataPicker placeholder="Select Jira field" loading={props.metadataLoading} options={(props.metadata?.fields ?? []).map((field) => ({ ...field, id: field.name }))} selected={props.store.draft.routing.repoField ? [props.store.draft.routing.repoField.fieldName] : []} onChange={(values) => props.setStore("draft", "routing", "repoField", values[0] ? { fieldName: values[0] } : undefined)} /></Show></Field>
       <Field label="Workspace">
         <SelectV2 appearance="large" options={[...workspaces]} current={props.store.draft.routing.workspace.type} label={(type) => type === "branch" ? "New branch" : type === "current" ? "Current checkout" : "Fresh worktree"} onSelect={(type) => type && props.setStore("draft", "routing", "workspace", type === "branch" ? { type, pattern: "issue/{{issue.key}}" } : { type })} />
       </Field>
@@ -525,7 +580,7 @@ function RoutingEditor(props: { store: EditorState; setStore: EditorSetter; meta
   )
 }
 
-function ActionEditor(props: { store: EditorState; setStore: EditorSetter; concurrentRuns: number; metadata?: Metadata }) {
+function ActionEditor(props: { store: EditorState; setStore: EditorSetter; concurrentRuns: number; metadata?: Metadata; projectLoading: boolean }) {
   return (
     <EditorSection title="Action" description="Choose what OpenCode prepares when an issue matches.">
       <Field label="On match">
@@ -538,7 +593,7 @@ function ActionEditor(props: { store: EditorState; setStore: EditorSetter; concu
         <p class="text-13-medium text-v2-text-text-strong">Write-back</p>
         <div class="mt-3 flex flex-col gap-3">
           <Check label="Post a comment when the session is created" checked={props.store.draft.action.writeback.comment} onChange={(checked) => props.setStore("draft", "action", "writeback", "comment", checked)} />
-          <Field label="Transition on start" hint="Optional provider status name."><Show when={props.store.draft.integrationID === "jira"} fallback={<TextInputV2 value={props.store.draft.action.writeback.transitionOnStart ?? ""} onInput={(event) => props.setStore("draft", "action", "writeback", "transitionOnStart", event.currentTarget.value || undefined)} />}><MetadataPicker placeholder="Select Jira status" options={(props.metadata?.statuses ?? []).map((status) => ({ ...status, id: status.name }))} selected={props.store.draft.action.writeback.transitionOnStart ? [props.store.draft.action.writeback.transitionOnStart] : []} onChange={(values) => props.setStore("draft", "action", "writeback", "transitionOnStart", values[0])} /></Show></Field>
+          <Field label="Transition on start" hint="Optional provider status name."><Show when={props.store.draft.integrationID === "jira"} fallback={<TextInputV2 value={props.store.draft.action.writeback.transitionOnStart ?? ""} onInput={(event) => props.setStore("draft", "action", "writeback", "transitionOnStart", event.currentTarget.value || undefined)} />}><MetadataPicker placeholder="Select Jira status" loading={props.projectLoading} options={(props.metadata?.statuses ?? []).map((status) => ({ ...status, id: status.name }))} selected={props.store.draft.action.writeback.transitionOnStart ? [props.store.draft.action.writeback.transitionOnStart] : []} onChange={(values) => props.setStore("draft", "action", "writeback", "transitionOnStart", values[0])} /></Show></Field>
           <Check label="Post a comment if the run fails" checked={props.store.draft.action.writeback.commentOnFailure} onChange={(checked) => props.setStore("draft", "action", "writeback", "commentOnFailure", checked)} />
         </div>
       </div>
@@ -614,11 +669,12 @@ function MetadataPicker(props: {
   loading?: boolean
 }) {
   const [state, setState] = createStore({ open: false, search: "" })
-  const selected = createMemo(() => props.selected.map((id) => props.options.find((option) => option.id === id) ?? { id, name: id }))
+  const options = createMemo(() => withUnavailableOptions(props.options, props.selected))
+  const selected = createMemo(() => props.selected.map((id) => options().find((option) => option.id === id)!))
   const filtered = createMemo(() => {
     const search = state.search.trim().toLowerCase()
-    if (!search) return props.options
-    return props.options.filter((option) => `${option.name} ${option.detail ?? ""}`.toLowerCase().includes(search))
+    if (!search) return options()
+    return options().filter((option) => `${option.name} ${option.detail ?? ""}`.toLowerCase().includes(search))
   })
   const toggle = (id: string) => {
     if (!props.multiple) {
@@ -672,6 +728,26 @@ function MetadataPicker(props: {
     </Popover>
   )
 }
+
+function MetadataSyncStatus(props: { result?: MetadataResult; loading: boolean; error?: string; polling: boolean; resyncing: boolean; onResync: () => void }) {
+  const state = () => metadataSyncState({ result: props.result, error: props.error, resyncing: props.resyncing })
+  const refreshing = () => state().refreshing
+  const warning = () => state().warning
+  const syncedAt = () => typeof props.result?.syncedAt === "number" ? props.result.syncedAt : undefined
+  return <div class="flex flex-wrap items-center gap-2 rounded-lg border border-v2-border-border-base bg-v2-background-bg-surface px-3 py-2"><p classList={{ "text-v2-text-text-danger": !!warning(), "text-v2-text-text-muted": !warning() }} class="min-w-0 flex-1 text-11-regular"><Show when={warning()} fallback={refreshing() ? "Refreshing Jira data on the server..." : props.polling ? "Checking for updated Jira data..." : syncedAt() ? `Synced ${relativeTime(syncedAt()!)}` : props.loading ? "Loading Jira data..." : "Jira data has not synced yet."}>Using Jira data{syncedAt() ? ` from ${relativeTime(syncedAt()!)}` : ""}. {warning()}</Show></p><ButtonV2 size="small" variant="ghost" disabled={refreshing()} onClick={props.onResync}>{refreshing() ? "Refreshing..." : "Resync"}</ButtonV2></div>
+}
+
+function metadataProjectLoading(result: MetadataResult | undefined, projects: ReadonlyArray<string>) {
+  if (!projects.length) return false
+  if (!result) return true
+  return projects.some((key) => result.missingProjectKeys.includes(key))
+}
+
+function metadataGlobalLoading(result: MetadataResult | undefined, loading: boolean) {
+  return loading || (!!result?.syncing && typeof result.syncedAt !== "number")
+}
+
+function relativeTime(value: number) { const minutes = Math.max(0, Math.floor((Date.now() - value) / 60_000)); if (minutes < 1) return "just now"; if (minutes < 60) return `${minutes}m ago`; const hours = Math.floor(minutes / 60); if (hours < 24) return `${hours}h ago`; return `${Math.floor(hours / 24)}d ago` }
 
 function mappingOptions(type: WatcherDraft["routing"]["mappings"][number]["key"]["type"], metadata?: Metadata) {
   if (type === "issueProject") return (metadata?.projects ?? []).map((project) => ({ id: project.key, name: project.name, imageUrl: project.imageUrl, detail: project.key }))

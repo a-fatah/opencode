@@ -2,17 +2,23 @@ import { describe, expect, test } from "bun:test"
 import {
   authExpiredMessage,
   canSave,
+  composeMetadataScope,
   criteriaSummary,
   emptyWatcherDraft,
   inboxActions,
   inboxAttentionCount,
   inboxBulkActionSupports,
   inboxQuery,
+  metadataPollDelay,
+  metadataPollNext,
+  metadataSyncState,
   outcomeLabel,
   routeRungs,
   routingSummary,
+  retainGlobalMetadata,
   selectableInboxItem,
   splitValues,
+  withUnavailableOptions,
   watcherAuthExpired,
 } from "./logic"
 
@@ -48,6 +54,52 @@ describe("watcher editor logic", () => {
     draft.integrationID = "int_github"
     draft.connectionID = "cred_github"
     expect(canSave(draft)).toBe(true)
+  })
+
+  test("adds explicit unavailable choices without changing stored values", () => {
+    expect(withUnavailableOptions([{ id: "open", name: "Open" }], ["deleted", "open", "deleted"])).toEqual([
+      { id: "open", name: "Open" },
+      { id: "deleted", name: "Unavailable: deleted" },
+    ])
+  })
+
+  test("caps metadata polling backoff and stops only at completion or deadline", () => {
+    expect([0, 1, 2, 3, 4, 20].map(metadataPollDelay)).toEqual([1_000, 2_000, 4_000, 8_000, 10_000, 10_000])
+    expect(metadataPollNext({ pending: true, elapsed: 119_999 })).toBe("poll")
+    expect(metadataPollNext({ pending: true, elapsed: 120_000 })).toBe("deadline")
+    expect(metadataPollNext({ pending: false, elapsed: 1 })).toBe("complete")
+  })
+
+  test("keeps an old sync warning while its retry is in flight", () => {
+    expect(metadataSyncState({
+      result: { syncing: true, syncError: "Previous Jira sync failed" },
+      resyncing: false,
+    })).toEqual({
+      refreshing: true,
+      warning: "Previous Jira sync failed",
+    })
+  })
+
+  test("retains only global metadata when the project scope changes", () => {
+    const previous = {
+      projects: [{ key: "OLD" }], users: [{ id: "old-user" }], labels: ["global"],
+      statuses: [{ id: "old-status" }], components: [{ id: "old-component" }],
+      issueTypes: [{ id: "old-type" }], fields: [{ id: "global-field" }],
+    }
+    expect(retainGlobalMetadata(previous)).toEqual({
+      ...previous, users: [], statuses: [], components: [], issueTypes: [],
+    })
+    const next = {
+      projects: [{ key: "NEW" }], users: [{ id: "new-user" }], labels: ["next"],
+      statuses: [{ id: "new-status" }], components: [{ id: "new-component" }],
+      issueTypes: [{ id: "new-type" }], fields: [{ id: "next-field" }],
+    }
+    expect(composeMetadataScope(previous, next, true)).toEqual({
+      ...next,
+      projects: [{ key: "NEW" }, { key: "OLD" }],
+      labels: ["global", "next"],
+      fields: [{ id: "next-field" }, { id: "global-field" }],
+    })
   })
 })
 

@@ -43,6 +43,7 @@ test("exposes every standard HTTP API group", () => {
     "createConnection",
     "rotateConnection",
     "metadata",
+    "syncMetadata",
     "preview",
     "getSettings",
     "updateSettings",

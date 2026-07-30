@@ -46,10 +46,11 @@ export interface Adapter {
   readonly method: Integration.KeyMethod
   readonly tenantIdentity: (inputs: Integration.Inputs) => Effect.Effect<string, InvalidInputError>
   readonly verify: (credential: Credential.Key) => Effect.Effect<IssueWatcher.VerificationResult, Error>
-  readonly metadata: (
+  readonly metadataGlobal: (credential: Credential.Key) => Effect.Effect<IssueWatcher.MetadataGlobal, Error>
+  readonly metadataProject: (
     credential: Credential.Key,
-    input: IssueWatcher.MetadataInput,
-  ) => Effect.Effect<IssueWatcher.Metadata, Error>
+    projectKey: string,
+  ) => Effect.Effect<IssueWatcher.MetadataProjectScope, Error>
   readonly search: (input: {
     readonly credential: Credential.Key
     readonly criteria: IssueWatcher.Criteria

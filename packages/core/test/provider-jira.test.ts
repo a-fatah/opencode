@@ -58,9 +58,9 @@ describe("Jira issue provider", () => {
     expect(await Effect.runPromise(adapter.tenantIdentity({ site: "https://example.atlassian.net/" }))).toBe(
       "https://example.atlassian.net",
     )
-    expect(await Effect.runPromise(adapter.tenantIdentity({ site: "ftp://example.test" }).pipe(Effect.flip))).toBeInstanceOf(
-      IssueProvider.InvalidInputError,
-    )
+    expect(
+      await Effect.runPromise(adapter.tenantIdentity({ site: "ftp://example.test" }).pipe(Effect.flip)),
+    ).toBeInstanceOf(IssueProvider.InvalidInputError)
     expect(
       await Effect.runPromise(adapter.tenantIdentity({ site: "https://name:secret@example.test" }).pipe(Effect.flip)),
     ).toBeInstanceOf(IssueProvider.InvalidInputError)
@@ -81,7 +81,9 @@ describe("Jira issue provider", () => {
     const adapter = makeJira(fakeHttp(() => new Response(null, { status: 401 })).client)
 
     expect(
-      await Effect.runPromise(adapter.verify(credential({ site: "https://example.test", email: " " })).pipe(Effect.flip)),
+      await Effect.runPromise(
+        adapter.verify(credential({ site: "https://example.test", email: " " })).pipe(Effect.flip),
+      ),
     ).toBeInstanceOf(IssueProvider.InvalidInputError)
     expect(await Effect.runPromise(adapter.verify(credential()).pipe(Effect.flip))).toBeInstanceOf(
       IssueProvider.AuthenticationError,
@@ -91,15 +93,46 @@ describe("Jira issue provider", () => {
   test("loads Jira metadata with names and images scoped to selected projects", async () => {
     const http = fakeHttp((request) => {
       const requestUrl = url(request)
-      if (requestUrl.pathname === "/rest/api/3/project/search") return Response.json({ total: 1, values: [{ id: "100", key: "ENG", name: "Engineering", avatarUrls: { "24x24": "https://example.test/project.png" } }] })
-      if (requestUrl.pathname === "/rest/api/3/label") return Response.json({ values: ["backend", "urgent", "backend"] })
-      if (requestUrl.pathname === "/rest/api/3/field") return Response.json([{ id: "summary", name: "Summary", custom: false }, { id: "customfield_1", name: "Repository", custom: true }])
-      if (requestUrl.pathname === "/rest/api/3/user/assignable/multiProjectSearch") return Response.json([{ accountId: "user-1", displayName: "Ada", active: true, avatarUrls: { "24x24": "https://example.test/ada.png" } }])
-      if (requestUrl.pathname === "/rest/api/3/project/ENG/statuses") return Response.json([{ id: "type-1", name: "Bug", iconUrl: "https://example.test/bug.png", statuses: [{ id: "status-1", name: "Open" }] }])
-      if (requestUrl.pathname === "/rest/api/3/project/ENG/components") return Response.json([{ id: "component-1", name: "API" }])
+      if (requestUrl.pathname === "/rest/api/3/project/search")
+        return Response.json({
+          total: 1,
+          values: [
+            { id: "100", key: "ENG", name: "Engineering", avatarUrls: { "24x24": "https://example.test/project.png" } },
+          ],
+        })
+      if (requestUrl.pathname === "/rest/api/3/label")
+        return Response.json({ values: ["backend", "urgent", "backend"] })
+      if (requestUrl.pathname === "/rest/api/3/field")
+        return Response.json([
+          { id: "summary", name: "Summary", custom: false },
+          { id: "customfield_1", name: "Repository", custom: true },
+        ])
+      if (requestUrl.pathname === "/rest/api/3/user/assignable/multiProjectSearch")
+        return Response.json([
+          {
+            accountId: "user-1",
+            displayName: "Ada",
+            active: true,
+            avatarUrls: { "24x24": "https://example.test/ada.png" },
+          },
+        ])
+      if (requestUrl.pathname === "/rest/api/3/project/ENG/statuses")
+        return Response.json([
+          {
+            id: "type-1",
+            name: "Bug",
+            iconUrl: "https://example.test/bug.png",
+            statuses: [{ id: "status-1", name: "Open" }],
+          },
+        ])
+      if (requestUrl.pathname === "/rest/api/3/project/ENG/components")
+        return Response.json([{ id: "component-1", name: "API" }])
       return new Response(null, { status: 404 })
     })
-    const result = await Effect.runPromise(makeJira(http.client).metadata(credential(), { issueProjects: ["ENG", "ENG"] }))
+    const adapter = makeJira(http.client)
+    const global = await Effect.runPromise(adapter.metadataGlobal(credential()))
+    const project = await Effect.runPromise(adapter.metadataProject(credential(), "ENG"))
+    const result = { ...global, ...project }
 
     expect(result).toEqual({
       projects: [{ id: "100", key: "ENG", name: "Engineering", imageUrl: "https://example.test/project.png" }],
@@ -110,29 +143,52 @@ describe("Jira issue provider", () => {
       issueTypes: [{ id: "type-1", name: "Bug", imageUrl: "https://example.test/bug.png" }],
       fields: [{ id: "customfield_1", name: "Repository" }],
     })
-    expect(http.requests.filter((request) => url(request).pathname === "/rest/api/3/project/ENG/statuses")).toHaveLength(1)
-    expect(url(http.requests.find((request) => url(request).pathname === "/rest/api/3/user/assignable/multiProjectSearch")!).searchParams.get("projectKeys")).toBe("ENG")
+    expect(
+      http.requests.filter((request) => url(request).pathname === "/rest/api/3/project/ENG/statuses"),
+    ).toHaveLength(1)
+    expect(
+      url(
+        http.requests.find((request) => url(request).pathname === "/rest/api/3/user/assignable/multiProjectSearch")!,
+      ).searchParams.get("projectKeys"),
+    ).toBe("ENG")
   })
 
-  test("loads active Jira users when all projects are selected", async () => {
+  test("loads active Jira users for one project", async () => {
     const http = fakeHttp((request) => {
       const requestUrl = url(request)
       const pathname = requestUrl.pathname
-      if (pathname === "/rest/api/3/project/search") return Response.json({ total: 2, values: [{ id: "100", key: "ENG", name: "Engineering" }, { id: "200", key: "OPS", name: "Operations" }] })
+      if (pathname === "/rest/api/3/project/search")
+        return Response.json({
+          total: 2,
+          values: [
+            { id: "100", key: "ENG", name: "Engineering" },
+            { id: "200", key: "OPS", name: "Operations" },
+          ],
+        })
       if (pathname === "/rest/api/3/label") return Response.json({ values: [] })
       if (pathname === "/rest/api/3/field") return Response.json([])
-      if (pathname === "/rest/api/3/user/assignable/multiProjectSearch") return requestUrl.searchParams.get("projectKeys") === "ENG"
-        ? Response.json([{ accountId: "active", displayName: "Ada", active: true }, { accountId: "inactive", displayName: "Grace", active: false }])
-        : new Response(null, { status: 400 })
+      if (pathname === "/rest/api/3/user/assignable/multiProjectSearch")
+        return requestUrl.searchParams.get("projectKeys") === "ENG"
+          ? Response.json([
+              { accountId: "active", displayName: "Ada", active: true },
+              { accountId: "inactive", displayName: "Grace", active: false },
+            ])
+          : new Response(null, { status: 400 })
+      if (pathname === "/rest/api/3/project/ENG/statuses" || pathname === "/rest/api/3/project/ENG/components")
+        return Response.json([])
       return new Response(null, { status: 404 })
     })
-    const result = await Effect.runPromise(makeJira(http.client).metadata(credential(), { issueProjects: [] }))
+    const adapter = makeJira(http.client)
+    await Effect.runPromise(adapter.metadataGlobal(credential()))
+    const result = await Effect.runPromise(adapter.metadataProject(credential(), "ENG"))
 
     expect(result.users).toEqual([{ id: "active", name: "Ada" }])
-    expect(http.requests
-      .filter((request) => url(request).pathname === "/rest/api/3/user/assignable/multiProjectSearch")
-      .map((request) => url(request).searchParams.get("projectKeys"))
-      .sort()).toEqual(["ENG", "OPS"])
+    expect(
+      http.requests
+        .filter((request) => url(request).pathname === "/rest/api/3/user/assignable/multiProjectSearch")
+        .map((request) => url(request).searchParams.get("projectKeys"))
+        .sort(),
+    ).toEqual(["ENG"])
   })
 
   test("loads every page of visible Jira projects", async () => {
@@ -150,7 +206,7 @@ describe("Jira issue provider", () => {
       if (requestUrl.pathname === "/rest/api/3/user/assignable/multiProjectSearch") return Response.json([])
       return new Response(null, { status: 404 })
     })
-    const result = await Effect.runPromise(makeJira(http.client).metadata(credential(), { issueProjects: [] }))
+    const result = await Effect.runPromise(makeJira(http.client).metadataGlobal(credential()))
 
     expect(result.projects.map((project) => project.key)).toEqual(["ENG", "OPS"])
     expect(http.requests.filter((request) => url(request).pathname === "/rest/api/3/project/search")).toHaveLength(2)
@@ -241,8 +297,12 @@ describe("Jira issue provider", () => {
 
   test("passes page tokens through and preserves numeric ID ordering at a timestamp boundary", async () => {
     const timestamp = "2026-07-29T12:34:56.789Z"
-    const cursor = Buffer.from(JSON.stringify({ updatedAt: Date.parse(timestamp), externalID: "9" })).toString("base64url")
-    const http = fakeHttp(() => Response.json({ issues: [jiraIssue("9", timestamp), jiraIssue("10", timestamp)], nextPageToken: "next-2" }))
+    const cursor = Buffer.from(JSON.stringify({ updatedAt: Date.parse(timestamp), externalID: "9" })).toString(
+      "base64url",
+    )
+    const http = fakeHttp(() =>
+      Response.json({ issues: [jiraIssue("9", timestamp), jiraIssue("10", timestamp)], nextPageToken: "next-2" }),
+    )
     const result = await Effect.runPromise(
       makeJira(http.client).search({ credential: credential(), criteria, cursor, page: "page-1" }),
     )
@@ -262,7 +322,11 @@ describe("Jira issue provider", () => {
   test("preserves the starting watermark on an empty page", async () => {
     const cursor = Buffer.from(JSON.stringify({ updatedAt: 42, externalID: "9" })).toString("base64url")
     const result = await Effect.runPromise(
-      makeJira(fakeHttp(() => Response.json({ issues: [] })).client).search({ credential: credential(), criteria, cursor }),
+      makeJira(fakeHttp(() => Response.json({ issues: [] })).client).search({
+        credential: credential(),
+        criteria,
+        cursor,
+      }),
     )
 
     expect(result.cursor).toBe(cursor)

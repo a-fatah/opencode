@@ -43,7 +43,11 @@ const JiraProject = Schema.Struct({
   name: Schema.String,
   avatarUrls: Schema.optional(JiraAvatarUrls),
 })
-const JiraProjects = Schema.Struct({ values: Schema.Array(JiraProject), total: Schema.Number })
+const JiraProjects = Schema.Struct({
+  values: Schema.Array(JiraProject),
+  total: Schema.Number,
+  isLast: Schema.optional(Schema.Boolean),
+})
 const JiraMetadataUser = Schema.Struct({
   accountId: Schema.String,
   displayName: Schema.String,
@@ -79,7 +83,9 @@ export function makeJira(http: HttpClient.HttpClient): IssueProvider.Adapter {
         return url.toString().replace(/\/$/, "")
       },
       catch: (error) =>
-        new IssueProvider.InvalidInputError({ detail: error instanceof Error ? error.message : "Invalid Jira site URL" }),
+        new IssueProvider.InvalidInputError({
+          detail: error instanceof Error ? error.message : "Invalid Jira site URL",
+        }),
     })
 
   const execute = <S extends Schema.Top>(credential: Credential.Key, path: string, schema: S) =>
@@ -95,9 +101,7 @@ export function makeJira(http: HttpClient.HttpClient): IssueProvider.Adapter {
             HttpClientRequest.basicAuth(email, credential.key),
           ),
         )
-        .pipe(
-          Effect.mapError(() => new IssueProvider.RequestError({ detail: "Jira request failed" })),
-        )
+        .pipe(Effect.mapError(() => new IssueProvider.RequestError({ detail: "Jira request failed" })))
       if (response.status === 401 || response.status === 403) {
         return yield* new IssueProvider.AuthenticationError({ detail: "Jira rejected the email or API token" })
       }
@@ -140,9 +144,11 @@ export function makeJira(http: HttpClient.HttpClient): IssueProvider.Adapter {
     const remaining = yield* Effect.forEach(
       offsets,
       (startAt) => execute(credential, `/rest/api/3/project/search?startAt=${startAt}&maxResults=50`, JiraProjects),
-      { concurrency: "unbounded" },
+      { concurrency: 4 },
     )
-    return [first, ...remaining].flatMap((page) => page.values)
+    return [
+      ...new Map([first, ...remaining].flatMap((page) => page.values).map((project) => [project.id, project])).values(),
+    ].toSorted((left, right) => left.name.localeCompare(right.name))
   })
 
   return {
@@ -161,60 +167,63 @@ export function makeJira(http: HttpClient.HttpClient): IssueProvider.Adapter {
       const user = yield* execute(credential, "/rest/api/3/myself", JiraUser)
       return { ok: true, detail: `Connected as ${user.displayName}` }
     }),
-    metadata: Effect.fn("Jira.metadata")(function* (credential, input) {
-      const projectKeys = [...new Set(input.issueProjects)]
-      const jiraProjects = yield* projects(credential)
-      const userProjectKeys = projectKeys.length ? projectKeys : jiraProjects.map((project) => project.key)
-      const [labels, fields, users, projectMetadata] = yield* Effect.all([
-        execute(credential, "/rest/api/3/label?maxResults=1000", JiraLabels),
-        execute(credential, "/rest/api/3/field", Schema.Array(JiraField)),
-        Effect.forEach(
-          userProjectKeys,
-          (key) => execute(
-            credential,
-            `/rest/api/3/user/assignable/multiProjectSearch?${new URLSearchParams({ projectKeys: key, maxResults: "1000" })}`,
-            Schema.Array(JiraMetadataUser),
-          ).pipe(Effect.catchTag("IssueProvider.RequestError", () => Effect.succeed([]))),
-          { concurrency: 4 },
-        ).pipe(Effect.map((results) => results.flat())),
-        Effect.forEach(
-          projectKeys,
-          (key) => {
-            const encoded = encodeURIComponent(key)
-            return Effect.all([
-              execute(credential, `/rest/api/3/project/${encoded}/statuses`, Schema.Array(JiraIssueTypeStatuses)),
-              execute(credential, `/rest/api/3/project/${encoded}/components`, Schema.Array(JiraComponent)),
-            ])
-          },
-          { concurrency: "unbounded" },
-        ),
-      ], { concurrency: "unbounded" })
-      return Schema.decodeUnknownSync(IssueWatcher.Metadata)({
+    metadataGlobal: Effect.fn("Jira.metadataGlobal")(function* (credential) {
+      const [jiraProjects, labels, fields] = yield* Effect.all(
+        [
+          projects(credential),
+          execute(credential, "/rest/api/3/label?maxResults=1000", JiraLabels),
+          execute(credential, "/rest/api/3/field", Schema.Array(JiraField)),
+        ],
+        { concurrency: "unbounded" },
+      )
+      return Schema.decodeUnknownSync(IssueWatcher.MetadataGlobal)({
         projects: jiraProjects.map((project) => ({
           id: project.id,
           key: project.key,
           name: project.name,
           ...(project.avatarUrls?.["24x24"] ? { imageUrl: project.avatarUrls["24x24"] } : {}),
         })),
-        users: uniqueOptions(users
-          .filter((user) => user.active !== false)
-          .map((user) => ({
-            id: user.accountId,
-            name: user.displayName,
-            ...(user.avatarUrls?.["24x24"] ? { imageUrl: user.avatarUrls["24x24"] } : {}),
-          }))),
         labels: [...new Set(labels.values)].sort((a, b) => a.localeCompare(b)),
-        statuses: uniqueOptions(projectMetadata.flatMap(([issueTypes]) =>
-          issueTypes.flatMap((issueType) => issueType.statuses.map((status) => ({ id: status.id, name: status.name }))))),
-        components: uniqueOptions(projectMetadata.flatMap(([, components]) =>
-          components.map((component) => ({ id: component.id, name: component.name })))),
-        issueTypes: uniqueOptions(projectMetadata.flatMap(([issueTypes]) =>
+        fields: uniqueOptions(
+          fields.filter((field) => field.custom).map((field) => ({ id: field.id, name: field.name })),
+        ),
+      })
+    }),
+    metadataProject: Effect.fn("Jira.metadataProject")(function* (credential, projectKey) {
+      const encoded = encodeURIComponent(projectKey)
+      const [users, issueTypes, components] = yield* Effect.all(
+        [
+          execute(
+            credential,
+            `/rest/api/3/user/assignable/multiProjectSearch?${new URLSearchParams({ projectKeys: projectKey, maxResults: "1000" })}`,
+            Schema.Array(JiraMetadataUser),
+          ),
+          execute(credential, `/rest/api/3/project/${encoded}/statuses`, Schema.Array(JiraIssueTypeStatuses)),
+          execute(credential, `/rest/api/3/project/${encoded}/components`, Schema.Array(JiraComponent)),
+        ],
+        { concurrency: "unbounded" },
+      )
+      return Schema.decodeUnknownSync(IssueWatcher.MetadataProjectScope)({
+        users: uniqueOptions(
+          users
+            .filter((user) => user.active !== false)
+            .map((user) => ({
+              id: user.accountId,
+              name: user.displayName,
+              ...(user.avatarUrls?.["24x24"] ? { imageUrl: user.avatarUrls["24x24"] } : {}),
+            })),
+        ),
+        statuses: uniqueOptions(
+          issueTypes.flatMap((issueType) => issueType.statuses.map((status) => ({ id: status.id, name: status.name }))),
+        ),
+        components: uniqueOptions(components.map((component) => ({ id: component.id, name: component.name }))),
+        issueTypes: uniqueOptions(
           issueTypes.map((issueType) => ({
             id: issueType.id,
             name: issueType.name,
             ...(issueType.iconUrl ? { imageUrl: issueType.iconUrl } : {}),
-          })))),
-        fields: uniqueOptions(fields.filter((field) => field.custom).map((field) => ({ id: field.id, name: field.name }))),
+          })),
+        ),
       })
     }),
     search: Effect.fn("Jira.search")(function* (input) {
@@ -223,7 +232,9 @@ export function makeJira(http: HttpClient.HttpClient): IssueProvider.Adapter {
       const cursor = encodedCursor
         ? yield* Effect.try({
             try: () => {
-              const cursor = Schema.decodeUnknownSync(Cursor)(JSON.parse(Buffer.from(encodedCursor, "base64url").toString()))
+              const cursor = Schema.decodeUnknownSync(Cursor)(
+                JSON.parse(Buffer.from(encodedCursor, "base64url").toString()),
+              )
               if (Number.isNaN(new Date(cursor.updatedAt).getTime())) throw new Error("Invalid Jira cursor timestamp")
               return cursor
             },
@@ -252,7 +263,10 @@ export function makeJira(http: HttpClient.HttpClient): IssueProvider.Adapter {
       ].filter((value): value is string => value !== undefined)
       const jql =
         input.criteria.escape?.language === "jql"
-          ? [input.criteria.escape.query, cursor ? `updated >= "${new Date(cursor.updatedAt).toISOString()}"` : undefined]
+          ? [
+              input.criteria.escape.query,
+              cursor ? `updated >= "${new Date(cursor.updatedAt).toISOString()}"` : undefined,
+            ]
               .filter((value): value is string => value !== undefined)
               .join(" AND ")
           : clauses.join(" AND ")
@@ -293,7 +307,9 @@ export function makeJira(http: HttpClient.HttpClient): IssueProvider.Adapter {
 }
 
 function uniqueOptions<T extends { readonly id: string; readonly name: string }>(options: ReadonlyArray<T>) {
-  return [...new Map(options.map((option) => [option.id, option])).values()].sort((a, b) => a.name.localeCompare(b.name))
+  return [...new Map(options.map((option) => [option.id, option])).values()].sort((a, b) =>
+    a.name.localeCompare(b.name),
+  )
 }
 
 const repositoryNames = new Set(["repository", "repo", "repositoryurl", "repourl"])
@@ -316,7 +332,11 @@ function jiraFieldText(value: Schema.Json | undefined): string | undefined {
   if (typeof value === "string") return value.trim() || undefined
   if (value === null || typeof value !== "object") return undefined
   if (isJsonArray(value)) {
-    const text = value.map(jiraFieldText).filter((value): value is string => value !== undefined).join("\n").trim()
+    const text = value
+      .map(jiraFieldText)
+      .filter((value): value is string => value !== undefined)
+      .join("\n")
+      .trim()
     return text || undefined
   }
   if (typeof value.text === "string") return value.text.trim() || undefined

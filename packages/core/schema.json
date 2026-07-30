@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "04dec366-8538-4257-a5ae-a2a906bdc7ef",
+  "id": "650c548f-fcba-4ac6-85c3-149c40dfa744",
   "prevIds": [
-    "d2b50482-1b06-43f9-873d-bab289e8a95d"
+    "990f9658-8bb1-4e7c-82c6-b4ba55f6246a"
   ],
   "ddl": [
     {
@@ -56,6 +56,14 @@
     },
     {
       "name": "issue_materialization",
+      "entityType": "tables"
+    },
+    {
+      "name": "issue_metadata_snapshot",
+      "entityType": "tables"
+    },
+    {
+      "name": "issue_metadata_sync",
       "entityType": "tables"
     },
     {
@@ -1199,6 +1207,186 @@
       "name": "time_updated",
       "entityType": "columns",
       "table": "issue_materialization"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "connection_id",
+      "entityType": "columns",
+      "table": "issue_metadata_snapshot"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "snapshot",
+      "entityType": "columns",
+      "table": "issue_metadata_snapshot"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "credential_generation",
+      "entityType": "columns",
+      "table": "issue_metadata_snapshot"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "issue_metadata_snapshot"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "issue_metadata_snapshot"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "connection_id",
+      "entityType": "columns",
+      "table": "issue_metadata_sync"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "scope",
+      "entityType": "columns",
+      "table": "issue_metadata_sync"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "requested_generation",
+      "entityType": "columns",
+      "table": "issue_metadata_sync"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "completed_generation",
+      "entityType": "columns",
+      "table": "issue_metadata_sync"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "credential_generation",
+      "entityType": "columns",
+      "table": "issue_metadata_sync"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "lease_token",
+      "entityType": "columns",
+      "table": "issue_metadata_sync"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "lease_until",
+      "entityType": "columns",
+      "table": "issue_metadata_sync"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "last_attempt_at",
+      "entityType": "columns",
+      "table": "issue_metadata_sync"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "last_error",
+      "entityType": "columns",
+      "table": "issue_metadata_sync"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "retry_after",
+      "entityType": "columns",
+      "table": "issue_metadata_sync"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "next_due_at",
+      "entityType": "columns",
+      "table": "issue_metadata_sync"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "issue_metadata_sync"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "issue_metadata_sync"
     },
     {
       "type": "text",
@@ -3323,6 +3511,16 @@
     {
       "columns": [
         "connection_id",
+        "scope"
+      ],
+      "nameExplicit": false,
+      "name": "issue_metadata_sync_pk",
+      "entityType": "pks",
+      "table": "issue_metadata_sync"
+    },
+    {
+      "columns": [
+        "connection_id",
         "external_id"
       ],
       "nameExplicit": false,
@@ -3466,6 +3664,15 @@
       "nameExplicit": false,
       "name": "issue_materialization_pk",
       "table": "issue_materialization",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "connection_id"
+      ],
+      "nameExplicit": false,
+      "name": "issue_metadata_snapshot_pk",
+      "table": "issue_metadata_snapshot",
       "entityType": "pks"
     },
     {
@@ -3833,6 +4040,20 @@
       "name": "issue_materialization_match_active_uidx",
       "entityType": "indexes",
       "table": "issue_materialization"
+    },
+    {
+      "columns": [
+        {
+          "value": "next_due_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "issue_metadata_sync_due_idx",
+      "entityType": "indexes",
+      "table": "issue_metadata_sync"
     },
     {
       "columns": [

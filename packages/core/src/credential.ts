@@ -1,6 +1,6 @@
 export * as Credential from "./credential"
 
-import { and, asc, eq, isNull } from "drizzle-orm"
+import { and, asc, eq, isNull, sql } from "drizzle-orm"
 import { Context, Effect, Layer, Schema } from "effect"
 import { Credential } from "@opencode-ai/schema/credential"
 import { Integration } from "@opencode-ai/schema/integration"
@@ -8,6 +8,7 @@ import { optional } from "@opencode-ai/schema"
 import { Database } from "./database/database"
 import { makeGlobalNode } from "./effect/app-node"
 import { CredentialTable } from "./credential/sql"
+import { IssueMetadataSnapshotTable, IssueMetadataSyncTable } from "./issue-watcher/sql"
 
 export const ID = Credential.ID
 export type ID = Credential.ID
@@ -65,6 +66,11 @@ export interface Interface {
   readonly rotateConnection: (
     connectionID: ConnectionID,
     updates: { readonly value: Key; readonly label?: string },
+  ) => Effect.Effect<Info, ConnectionNotFoundError>
+  /** Updates verification health without rotating unchanged credential material. */
+  readonly updateConnectionHealth: (
+    connectionID: ConnectionID,
+    verification: Credential.Verification,
   ) => Effect.Effect<Info, ConnectionNotFoundError>
   /** Updates the label or secret value of a stored credential. */
   readonly update: (id: ID, updates: Partial<Pick<Info, "label" | "value">>) => Effect.Effect<void>
@@ -172,34 +178,77 @@ const layer = Layer.effect(
           label: input.label ?? "default",
           value: input.value,
         })
-        yield* db
-          .insert(CredentialTable)
-          .values({
+        const now = Date.now()
+        yield* db.transaction((tx) => Effect.gen(function* () {
+          yield* tx.insert(CredentialTable).values({
             id: credential.id,
             integration_id: credential.integrationID,
             connection_id: credential.connectionID,
             tenant_identity: credential.tenantIdentity,
             label: credential.label,
             value: credential.value,
-          })
-          .run()
-          .pipe(Effect.orDie)
+          }).run()
+          yield* tx.insert(IssueMetadataSnapshotTable).values({
+            connection_id: input.connectionID,
+            snapshot: { connectionID: input.connectionID, projects: {}, updatedAt: now },
+            credential_generation: 0,
+            time_created: now,
+            time_updated: now,
+          }).run()
+          yield* tx.insert(IssueMetadataSyncTable).values({
+            connection_id: input.connectionID,
+            scope: "global",
+            requested_generation: 1,
+            completed_generation: 0,
+            credential_generation: 0,
+            next_due_at: now,
+            time_created: now,
+            time_updated: now,
+          }).run()
+        }), { behavior: "immediate" }).pipe(Effect.orDie)
         return credential
       }),
       rotateConnection: Effect.fn("Credential.rotateConnection")(function* (connectionID, updates) {
-        const row = yield* db
-          .select()
-          .from(CredentialTable)
-          .where(eq(CredentialTable.connection_id, connectionID))
-          .get()
-          .pipe(Effect.orDie)
-        if (!row) return yield* new ConnectionNotFoundError({ connectionID })
-        yield* db
-          .update(CredentialTable)
-          .set({ value: updates.value, label: updates.label })
-          .where(eq(CredentialTable.connection_id, connectionID))
-          .run()
-          .pipe(Effect.orDie)
+        const found = yield* db.transaction((tx) => Effect.gen(function* () {
+          const row = yield* tx.select().from(CredentialTable)
+            .where(eq(CredentialTable.connection_id, connectionID)).get()
+          if (!row) return false
+          const now = Date.now()
+          yield* tx.update(CredentialTable).set({ value: updates.value, label: updates.label })
+            .where(eq(CredentialTable.connection_id, connectionID)).run()
+          yield* tx.insert(IssueMetadataSnapshotTable).values({
+            connection_id: connectionID,
+            snapshot: { connectionID, projects: {}, updatedAt: now },
+            credential_generation: 0,
+            time_created: now,
+            time_updated: now,
+          }).onConflictDoNothing().run()
+          yield* tx.insert(IssueMetadataSyncTable).values({
+            connection_id: connectionID,
+            scope: "global",
+            requested_generation: 0,
+            completed_generation: 0,
+            credential_generation: 0,
+            next_due_at: now,
+            time_created: now,
+            time_updated: now,
+          }).onConflictDoNothing().run()
+          yield* tx.update(IssueMetadataSnapshotTable).set({
+            credential_generation: sql`${IssueMetadataSnapshotTable.credential_generation} + 1`,
+            time_updated: now,
+          }).where(eq(IssueMetadataSnapshotTable.connection_id, connectionID)).run()
+          yield* tx.update(IssueMetadataSyncTable).set({
+            credential_generation: sql`${IssueMetadataSyncTable.credential_generation} + 1`,
+            requested_generation: sql`${IssueMetadataSyncTable.requested_generation} + 1`,
+            lease_token: null,
+            lease_until: null,
+            retry_after: null,
+            next_due_at: now,
+            time_updated: now,
+          }).where(eq(IssueMetadataSyncTable.connection_id, connectionID)).run()
+          return true
+        }), { behavior: "immediate" }).pipe(Effect.orDie)
+        if (!found) return yield* new ConnectionNotFoundError({ connectionID })
         const updated = yield* db
           .select()
           .from(CredentialTable)
@@ -208,6 +257,22 @@ const layer = Layer.effect(
           .pipe(Effect.orDie)
         if (!updated) return yield* Effect.die("Rotated credential was not found")
         return stored(updated) ?? (yield* Effect.die("Rotated credential is invalid"))
+      }),
+      updateConnectionHealth: Effect.fn("Credential.updateConnectionHealth")(function* (connectionID, verification) {
+        const updated = yield* db.transaction((tx) => Effect.gen(function* () {
+          const row = yield* tx.select().from(CredentialTable)
+            .where(eq(CredentialTable.connection_id, connectionID)).get()
+          if (!row) return
+          const value = decode(row.value)
+          if (value.type !== "key") return
+          yield* tx.update(CredentialTable).set({
+            value: Credential.Key.make({ ...value, verification }),
+          }).where(eq(CredentialTable.connection_id, connectionID)).run()
+          return yield* tx.select().from(CredentialTable)
+            .where(eq(CredentialTable.connection_id, connectionID)).get()
+        }), { behavior: "immediate" }).pipe(Effect.orDie)
+        if (!updated) return yield* new ConnectionNotFoundError({ connectionID })
+        return stored(updated) ?? (yield* Effect.die("Updated credential is invalid"))
       }),
       update: Effect.fn("Credential.update")(function* (id, updates) {
         if (!updates.label && !updates.value) return
@@ -219,7 +284,17 @@ const layer = Layer.effect(
           .pipe(Effect.orDie)
       }),
       remove: Effect.fn("Credential.remove")(function* (id) {
-        yield* db.delete(CredentialTable).where(eq(CredentialTable.id, id)).run().pipe(Effect.orDie)
+        yield* db.transaction((tx) => Effect.gen(function* () {
+          const credential = yield* tx.select({ connection_id: CredentialTable.connection_id })
+            .from(CredentialTable).where(eq(CredentialTable.id, id)).get()
+          if (credential?.connection_id) {
+            yield* tx.delete(IssueMetadataSnapshotTable)
+              .where(eq(IssueMetadataSnapshotTable.connection_id, credential.connection_id)).run()
+            yield* tx.delete(IssueMetadataSyncTable)
+              .where(eq(IssueMetadataSyncTable.connection_id, credential.connection_id)).run()
+          }
+          yield* tx.delete(CredentialTable).where(eq(CredentialTable.id, id)).run()
+        }), { behavior: "immediate" }).pipe(Effect.orDie)
       }),
     })
   }),

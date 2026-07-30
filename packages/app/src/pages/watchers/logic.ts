@@ -50,6 +50,86 @@ export function splitValues(value: string) {
     .filter((item, index, values) => !!item && values.indexOf(item) === index)
 }
 
+export function withUnavailableOptions<T extends { readonly id: string; readonly name: string; readonly imageUrl?: string; readonly detail?: string }>(
+  options: ReadonlyArray<T>,
+  selected: ReadonlyArray<string>,
+): ReadonlyArray<{ readonly id: string; readonly name: string; readonly imageUrl?: string; readonly detail?: string }> {
+  const ids = new Set(options.map((option) => option.id))
+  return [
+    ...options,
+    ...selected.filter((id, index) => !ids.has(id) && selected.indexOf(id) === index).map((id) => ({
+      id,
+      name: `Unavailable: ${id}`,
+    })),
+  ]
+}
+
+export const metadataPollDeadline = 120_000
+
+export function metadataPollDelay(attempt: number) {
+  return Math.min(1_000 * 2 ** Math.max(0, attempt), 10_000)
+}
+
+export function metadataPollNext(input: { pending: boolean; elapsed: number }) {
+  if (!input.pending) return "complete" as const
+  if (input.elapsed >= metadataPollDeadline) return "deadline" as const
+  return "poll" as const
+}
+
+export function metadataSyncState(input: {
+  readonly result?: { readonly syncing: boolean; readonly syncError?: string }
+  readonly error?: string
+  readonly resyncing: boolean
+}) {
+  return {
+    refreshing: input.resyncing || !!input.result?.syncing,
+    warning: input.result?.syncError || input.error,
+  }
+}
+
+type ScopedMetadata = {
+  readonly projects: ReadonlyArray<{ readonly key: string }>
+  readonly users: ReadonlyArray<unknown>
+  readonly labels: ReadonlyArray<string>
+  readonly statuses: ReadonlyArray<unknown>
+  readonly components: ReadonlyArray<unknown>
+  readonly issueTypes: ReadonlyArray<unknown>
+  readonly fields: ReadonlyArray<unknown>
+}
+
+export function retainGlobalMetadata<T extends ScopedMetadata>(metadata: T): T {
+  return {
+    ...metadata,
+    users: [],
+    statuses: [],
+    components: [],
+    issueTypes: [],
+  }
+}
+
+export function composeMetadataScope<T extends ScopedMetadata>(previous: T | undefined, next: T, pending: boolean): T {
+  if (!pending || !previous) return next
+  const projectKeys = new Set(next.projects.map((item) => item.key))
+  return {
+    ...next,
+    projects: [...next.projects, ...previous.projects.filter((item) => !projectKeys.has(item.key))],
+    labels: [...new Set([...previous.labels, ...next.labels])],
+    fields: mergeMetadataOptions(previous.fields, next.fields),
+  }
+}
+
+function mergeMetadataOptions<T>(previous: ReadonlyArray<T>, next: ReadonlyArray<T>) {
+  const ids = new Set(next.map(metadataOptionKey))
+  return [...next, ...previous.filter((item) => !ids.has(metadataOptionKey(item)))]
+}
+
+function metadataOptionKey(value: unknown) {
+  if (typeof value !== "object" || value === null) return value
+  if ("id" in value) return value.id
+  if ("name" in value) return value.name
+  return value
+}
+
 export function criteriaSummary(criteria: {
   readonly issueProjects: readonly string[]
   readonly assignee?: "me" | { readonly id: string }

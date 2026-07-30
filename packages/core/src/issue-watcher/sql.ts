@@ -24,6 +24,33 @@ export const IssueWatcherTable = sqliteTable("issue_watcher", {
   ...Timestamps,
 })
 
+export const IssueMetadataSnapshotTable = sqliteTable("issue_metadata_snapshot", {
+  connection_id: text().$type<IssueWatcher.ConnectionID>().primaryKey(),
+  snapshot: text({ mode: "json" }).$type<IssueWatcher.MetadataSnapshot>().notNull(),
+  credential_generation: integer().notNull().default(0),
+  time_created: integer().notNull(),
+  time_updated: integer().notNull(),
+})
+
+export const IssueMetadataSyncTable = sqliteTable("issue_metadata_sync", {
+  connection_id: text().$type<IssueWatcher.ConnectionID>().notNull(),
+  scope: text().notNull(),
+  requested_generation: integer().notNull().default(0),
+  completed_generation: integer().notNull().default(0),
+  credential_generation: integer().notNull().default(0),
+  lease_token: text(),
+  lease_until: integer(),
+  last_attempt_at: integer(),
+  last_error: text(),
+  retry_after: integer(),
+  next_due_at: integer().notNull(),
+  time_created: integer().notNull(),
+  time_updated: integer().notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.connection_id, table.scope] }),
+  index("issue_metadata_sync_due_idx").on(table.next_due_at),
+])
+
 export const IssueWatcherRunTable = sqliteTable(
   "issue_watcher_run",
   {

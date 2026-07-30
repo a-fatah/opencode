@@ -53,6 +53,8 @@ const SourceErrors = [
   IssueIntegrationProviderError,
 ] as const
 
+const MetadataErrors = [IssueIntegrationNotFoundError, IssueIntegrationConnectionNotFoundError] as const
+
 const IssueWatcherUpdatePayload = Schema.Struct({
   ...IssueWatcher.UpdateInput.fields,
   integrationID: Schema.optional(Schema.Never),
@@ -100,9 +102,16 @@ export const IssueWatcherGroup = HttpApiGroup.make("server.issueWatcher")
     HttpApiEndpoint.post("issueWatcher.metadata", "/api/issue-watcher/integrations/:integrationID/connection/:connectionID/metadata", {
       params: { integrationID: Integration.ID, connectionID: IssueWatcher.ConnectionID },
       payload: IssueWatcher.MetadataInput,
-      success: IssueWatcher.Metadata,
-      error: SourceErrors,
+      success: IssueWatcher.MetadataResult,
+      error: MetadataErrors,
     }).annotateMerge(OpenApi.annotations({ identifier: "v2.issueWatcher.integration.metadata", summary: "List issue source metadata" })),
+  )
+  .add(
+    HttpApiEndpoint.post("issueWatcher.syncMetadata", "/api/issue-watcher/integrations/:integrationID/connection/:connectionID/metadata/sync", {
+      params: { integrationID: Integration.ID, connectionID: IssueWatcher.ConnectionID },
+      success: IssueWatcher.MetadataSyncStatus,
+      error: MetadataErrors,
+    }).annotateMerge(OpenApi.annotations({ identifier: "v2.issueWatcher.integration.metadata.sync", summary: "Refresh issue source metadata" })),
   )
   .add(
     HttpApiEndpoint.post("issueWatcher.preview", "/api/issue-watcher/preview", {

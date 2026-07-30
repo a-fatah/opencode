@@ -1,9 +1,9 @@
 export * as IssueWatcher from "./issue-watcher"
 
-import { and, asc, desc, eq, exists, isNotNull, isNull, lt, notExists, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, exists, isNotNull, isNull, lt, lte, notExists, or, sql } from "drizzle-orm"
 import { IssueWatcher } from "@opencode-ai/schema/issue-watcher"
 import { IssueMatch } from "@opencode-ai/schema/issue-match"
-import { Cause, Context, DateTime, Deferred, Effect, Exit, Layer, Option, Ref, Result, Schema } from "effect"
+import { Cause, Context, DateTime, Deferred, Effect, Exit, Layer, Option, Ref, Result, Schema, Semaphore } from "effect"
 import { Database } from "./database/database"
 import { makeGlobalNode } from "./effect/app-node"
 import { EventV2 } from "./event"
@@ -19,8 +19,11 @@ import {
   IssueWatcherIgnoreTable,
   IssueWatcherRunTable,
   IssueWatcherTable,
+  IssueMetadataSnapshotTable,
+  IssueMetadataSyncTable,
 } from "./issue-watcher/sql"
 import { Credential } from "./credential"
+import { CredentialTable } from "./credential/sql"
 import { Integration } from "@opencode-ai/schema/integration"
 import { Issue } from "@opencode-ai/schema/issue"
 import { Repository } from "./repository"
@@ -49,6 +52,11 @@ export const PreviewLimit = 100
 export const PreviewPageLimit = 20
 export const PollPageLimit = 100
 export const ListLimit = 1000
+export const MetadataFreshness = 12 * 60 * 60 * 1000
+export const MetadataRetryCooldown = 60 * 1000
+const MetadataLeaseDuration = 5 * 60 * 1000
+const MetadataSchedulerInterval = 60 * 1000
+const MetadataJitter = 30 * 60 * 1000
 
 export function route(
   issue: Issue.Info,
@@ -190,7 +198,7 @@ export interface Interface {
     readonly create: (
       integrationID: Integration.ID,
       input: IssueWatcher.ConnectionCreateInput,
-    ) => Effect.Effect<IssueWatcher.IntegrationSummary, SourceNotFoundError | IssueProvider.Error>
+    ) => Effect.Effect<IssueWatcher.IntegrationSummary, SourceNotFoundError | ConnectionNotFoundError | IssueProvider.Error>
     readonly rotate: (
       integrationID: Integration.ID,
       connectionID: Credential.ConnectionID,
@@ -203,7 +211,11 @@ export interface Interface {
       integrationID: Integration.ID,
       connectionID: Credential.ConnectionID,
       input: IssueWatcher.MetadataInput,
-    ) => Effect.Effect<IssueWatcher.Metadata, SourceNotFoundError | ConnectionNotFoundError | IssueProvider.Error>
+    ) => Effect.Effect<IssueWatcher.MetadataResult, SourceNotFoundError | ConnectionNotFoundError>
+    readonly syncMetadata: (
+      integrationID: Integration.ID,
+      connectionID: Credential.ConnectionID,
+    ) => Effect.Effect<IssueWatcher.MetadataSyncStatus, SourceNotFoundError | ConnectionNotFoundError>
   }
   readonly summary: () => Effect.Effect<IssueWatcher.InboxSummary>
   readonly run: (id: ID) => Effect.Effect<IssueWatcher.Run, NotFoundError | OwnerConflictError | RunConflictError>
@@ -264,7 +276,11 @@ const layer = Layer.effect(
     const decodeLink = Schema.decodeUnknownSync(IssueMatch.SessionLink)
     const decodeMaterialization = Schema.decodeUnknownSync(IssueMatch.Materialization)
     const decodeWriteback = Schema.decodeUnknownSync(IssueMatch.WritebackOperation)
+    const decodeMetadataSnapshot = Schema.decodeUnknownSync(IssueWatcher.MetadataSnapshot)
     const active = new Map<ID, Deferred.Deferred<IssueWatcher.Run, NotFoundError | RunConflictError>>()
+    const metadataProviderCapacity = Semaphore.makeUnsafe(8)
+    const metadataConnectionCapacity = new Map<string, Semaphore.Semaphore>()
+    const serviceScope = yield* Effect.scope
     const materialization = yield* IssueWatcherMaterialization.make({
       db,
       events,
@@ -299,6 +315,330 @@ const layer = Layer.effect(
       const row = yield* db.select().from(IssueWatcherTable).where(eq(IssueWatcherTable.id, id)).get().pipe(Effect.orDie)
       if (!row) return yield* new NotFoundError({ id })
       return stored(row)
+    })
+
+    const metadataSnapshotRow = Effect.fnUntraced(function* (connectionID: Credential.ConnectionID) {
+      const row = yield* db.select().from(IssueMetadataSnapshotTable)
+        .where(eq(IssueMetadataSnapshotTable.connection_id, connectionID)).get().pipe(Effect.orDie)
+      return row
+    })
+
+    const metadataSnapshot = Effect.fnUntraced(function* (connectionID: Credential.ConnectionID) {
+      const row = yield* metadataSnapshotRow(connectionID)
+      return row ? decodeMetadataSnapshot(row.snapshot) : undefined
+    })
+
+    const emptyMetadataSnapshot = (connectionID: Credential.ConnectionID, now: number): IssueWatcher.MetadataSnapshot => ({
+      connectionID,
+      projects: {},
+      updatedAt: now,
+    })
+
+    const metadataError = (error: IssueProvider.Error) =>
+      error._tag === "IssueProvider.NotImplementedError" ? `${error.operation} is not implemented` : error.detail
+
+    const scopeJitter = (connectionID: string, scope: string) => {
+      let hash = 2166136261
+      for (const char of `${connectionID}:${scope}`) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619)
+      return (hash >>> 0) % MetadataJitter
+    }
+
+    const nextDue = (connectionID: string, scope: string, now: number) =>
+      now + MetadataFreshness + scopeJitter(connectionID, scope)
+
+    const requestMetadataScope = Effect.fnUntraced(function* (
+      connectionID: Credential.ConnectionID,
+      scope: string,
+      force: boolean,
+    ) {
+      const startedAt = Date.now()
+      const outcome = yield* db.transaction((tx) => Effect.gen(function* () {
+        const connection = yield* tx.select({ id: CredentialTable.id }).from(CredentialTable)
+          .where(eq(CredentialTable.connection_id, connectionID)).get()
+        if (!connection) return "rejected_missing_connection" as const
+        const now = Date.now()
+        const snapshotRow = yield* tx.select().from(IssueMetadataSnapshotTable)
+          .where(eq(IssueMetadataSnapshotTable.connection_id, connectionID)).get()
+        if (!snapshotRow) {
+          yield* tx.insert(IssueMetadataSnapshotTable).values({
+            connection_id: connectionID,
+            snapshot: emptyMetadataSnapshot(connectionID, now),
+            credential_generation: 0,
+            time_created: now,
+            time_updated: now,
+          }).run()
+        }
+        const credentialGeneration = snapshotRow?.credential_generation ?? 0
+        const row = yield* tx.select().from(IssueMetadataSyncTable).where(and(
+          eq(IssueMetadataSyncTable.connection_id, connectionID),
+          eq(IssueMetadataSyncTable.scope, scope),
+        )).get()
+        if (!row) {
+          yield* tx.insert(IssueMetadataSyncTable).values({
+            connection_id: connectionID,
+            scope,
+            requested_generation: 1,
+            completed_generation: 0,
+            credential_generation: credentialGeneration,
+            next_due_at: now,
+            time_created: now,
+            time_updated: now,
+          }).run()
+          return "requested" as const
+        }
+        if (row.requested_generation > row.completed_generation) return "deduplicated_pending" as const
+        if (!force && (row.retry_after ?? 0) > now) return "rejected_cooldown" as const
+        yield* tx.update(IssueMetadataSyncTable).set({
+          requested_generation: sql`${IssueMetadataSyncTable.requested_generation} + 1`,
+          retry_after: force ? null : row.retry_after,
+          next_due_at: now,
+          time_updated: now,
+        }).where(and(
+          eq(IssueMetadataSyncTable.connection_id, connectionID),
+          eq(IssueMetadataSyncTable.scope, scope),
+        )).run()
+        return "requested" as const
+      }), { behavior: "immediate" }).pipe(Effect.orDie)
+      yield* Effect.logInfo("issue metadata request", {
+        connectionID,
+        scope,
+        force,
+        outcome,
+        durationMs: Date.now() - startedAt,
+      })
+      return outcome === "requested"
+    })
+
+    const claimMetadataScope = Effect.fnUntraced(function* (connectionID: Credential.ConnectionID, scope: string) {
+      const startedAt = Date.now()
+      const result = yield* db.transaction((tx) => Effect.gen(function* () {
+        const now = Date.now()
+        const row = yield* tx.select().from(IssueMetadataSyncTable).where(and(
+          eq(IssueMetadataSyncTable.connection_id, connectionID),
+          eq(IssueMetadataSyncTable.scope, scope),
+        )).get()
+        if (!row) return { outcome: "rejected_missing_request" as const }
+        if (row.requested_generation <= row.completed_generation) return { outcome: "deduplicated_complete" as const }
+        if ((row.retry_after ?? 0) > now) return { outcome: "rejected_cooldown" as const }
+        if ((row.lease_until ?? 0) > now) return { outcome: "deduplicated_leased" as const }
+        const token = crypto.randomUUID()
+        const claimed = yield* tx.update(IssueMetadataSyncTable).set({
+          lease_token: token,
+          lease_until: now + MetadataLeaseDuration,
+          last_attempt_at: now,
+          time_updated: now,
+        }).where(and(
+          eq(IssueMetadataSyncTable.connection_id, connectionID),
+          eq(IssueMetadataSyncTable.scope, scope),
+          eq(IssueMetadataSyncTable.requested_generation, row.requested_generation),
+          eq(IssueMetadataSyncTable.credential_generation, row.credential_generation),
+          or(isNull(IssueMetadataSyncTable.lease_until), lte(IssueMetadataSyncTable.lease_until, now)),
+        )).returning({ token: IssueMetadataSyncTable.lease_token }).get()
+        return claimed
+          ? { outcome: "claimed" as const, claim: { token, generation: row.requested_generation, credentialGeneration: row.credential_generation } }
+          : { outcome: "deduplicated_race" as const }
+      }), { behavior: "immediate" }).pipe(Effect.orDie)
+      yield* Effect.logInfo("issue metadata claim", {
+        connectionID,
+        scope,
+        outcome: result.outcome,
+        durationMs: Date.now() - startedAt,
+      })
+      return result.outcome === "claimed" ? result.claim : undefined
+    })
+
+    const metadataStatus = Effect.fnUntraced(function* (connectionID: Credential.ConnectionID) {
+      const rows = yield* db.select().from(IssueMetadataSyncTable)
+        .where(eq(IssueMetadataSyncTable.connection_id, connectionID)).all().pipe(Effect.orDie)
+      const now = Date.now()
+      const latest = rows.toSorted((a, b) => (b.last_attempt_at ?? 0) - (a.last_attempt_at ?? 0))[0]
+      const errors = rows.filter((row) => row.last_error !== null)
+        .map((row) => `${row.scope}: ${row.last_error}`)
+        .toSorted()
+      return IssueWatcher.MetadataSyncStatus.make({
+        syncing: rows.some((row) => row.requested_generation > row.completed_generation || (row.lease_until ?? 0) > now),
+        refreshingProjectKeys: rows.filter((row) => row.scope.startsWith("project:") && (
+          row.requested_generation > row.completed_generation || (row.lease_until ?? 0) > now
+        )).map((row) => row.scope.slice("project:".length)).toSorted(),
+        ...(latest?.last_attempt_at === null || latest?.last_attempt_at === undefined ? {} : { lastAttemptAt: latest.last_attempt_at }),
+        ...(errors.length === 0 ? {} : { syncError: errors.join("; ") }),
+      })
+    })
+
+    const metadataView = Effect.fnUntraced(function* (connectionID: Credential.ConnectionID) {
+      return yield* db.transaction((tx) => Effect.gen(function* () {
+        const snapshotRow = yield* tx.select().from(IssueMetadataSnapshotTable)
+          .where(eq(IssueMetadataSnapshotTable.connection_id, connectionID)).get()
+        const rows = yield* tx.select().from(IssueMetadataSyncTable)
+          .where(eq(IssueMetadataSyncTable.connection_id, connectionID)).all()
+        const now = Date.now()
+        const latest = rows.toSorted((a, b) => (b.last_attempt_at ?? 0) - (a.last_attempt_at ?? 0))[0]
+        const errors = rows.filter((row) => row.last_error !== null)
+          .map((row) => `${row.scope}: ${row.last_error}`)
+          .toSorted()
+        return {
+          snapshot: snapshotRow ? decodeMetadataSnapshot(snapshotRow.snapshot) : undefined,
+          status: IssueWatcher.MetadataSyncStatus.make({
+            syncing: rows.some((row) => row.requested_generation > row.completed_generation || (row.lease_until ?? 0) > now),
+            refreshingProjectKeys: rows.filter((row) => row.scope.startsWith("project:") && (
+              row.requested_generation > row.completed_generation || (row.lease_until ?? 0) > now
+            )).map((row) => row.scope.slice("project:".length)).toSorted(),
+            ...(latest?.last_attempt_at === null || latest?.last_attempt_at === undefined ? {} : { lastAttemptAt: latest.last_attempt_at }),
+            ...(errors.length === 0 ? {} : { syncError: errors.join("; ") }),
+          }),
+        }
+      })).pipe(Effect.orDie)
+    })
+
+    const runMetadataScope = Effect.fnUntraced(function* (
+      adapter: IssueProvider.Adapter,
+      connectionID: Credential.ConnectionID,
+      scope: string,
+      reason: string,
+    ) {
+      const claim = yield* claimMetadataScope(connectionID, scope)
+      if (!claim) return false
+      const startedAt = Date.now()
+      const credential = yield* ownedConnection(adapter.integrationID, connectionID)
+      const projectKey = scope.startsWith("project:") ? scope.slice("project:".length) : undefined
+      const connectionCapacity = metadataConnectionCapacity.get(connectionID) ?? Semaphore.makeUnsafe(4)
+      metadataConnectionCapacity.set(connectionID, connectionCapacity)
+      const providerEffect: Effect.Effect<IssueWatcher.MetadataGlobal | IssueWatcher.MetadataProjectScope, IssueProvider.Error> = projectKey
+        ? adapter.metadataProject(credential, projectKey).pipe(Effect.map((value) => value as IssueWatcher.MetadataGlobal | IssueWatcher.MetadataProjectScope))
+        : adapter.metadataGlobal(credential).pipe(Effect.map((value) => value as IssueWatcher.MetadataGlobal | IssueWatcher.MetadataProjectScope))
+      const renewLease = Effect.suspend(() => {
+        const now = Date.now()
+        return db.update(IssueMetadataSyncTable).set({
+          lease_until: now + MetadataLeaseDuration,
+          time_updated: now,
+        }).where(and(
+          eq(IssueMetadataSyncTable.connection_id, connectionID),
+          eq(IssueMetadataSyncTable.scope, scope),
+          eq(IssueMetadataSyncTable.lease_token, claim.token),
+          eq(IssueMetadataSyncTable.requested_generation, claim.generation),
+          eq(IssueMetadataSyncTable.credential_generation, claim.credentialGeneration),
+        )).run().pipe(Effect.orDie)
+      })
+      const activeProviderEffect = Effect.scoped(Effect.gen(function* () {
+        yield* renewLease
+        yield* renewLease.pipe(
+          Effect.delay(MetadataLeaseDuration / 3),
+          Effect.forever,
+          Effect.forkScoped,
+        )
+        return yield* metadataProviderCapacity.withPermit(connectionCapacity.withPermit(providerEffect))
+      }))
+      yield* activeProviderEffect.pipe(
+        Effect.result,
+        Effect.flatMap((result) => db.transaction((tx) => Effect.gen(function* () {
+          const row = yield* tx.select().from(IssueMetadataSyncTable).where(and(
+            eq(IssueMetadataSyncTable.connection_id, connectionID),
+            eq(IssueMetadataSyncTable.scope, scope),
+            eq(IssueMetadataSyncTable.lease_token, claim.token),
+            eq(IssueMetadataSyncTable.requested_generation, claim.generation),
+            eq(IssueMetadataSyncTable.credential_generation, claim.credentialGeneration),
+          )).get()
+          if (!row) return "superseded" as const
+          const now = Date.now()
+          if (result._tag === "Success") {
+            const snapshotRow = yield* tx.select().from(IssueMetadataSnapshotTable)
+              .where(and(
+                eq(IssueMetadataSnapshotTable.connection_id, connectionID),
+                eq(IssueMetadataSnapshotTable.credential_generation, claim.credentialGeneration),
+              )).get()
+            if (!snapshotRow) return "superseded" as const
+            const snapshot = decodeMetadataSnapshot(snapshotRow.snapshot)
+            const next: IssueWatcher.MetadataSnapshot = projectKey
+              ? {
+                ...snapshot,
+                projects: {
+                  ...snapshot.projects,
+                  [projectKey]: { ...(result.success as IssueWatcher.MetadataProjectScope), syncedAt: now },
+                },
+                updatedAt: now,
+              }
+              : {
+                ...snapshot,
+                global: { ...(result.success as IssueWatcher.MetadataGlobal), syncedAt: now },
+                updatedAt: now,
+              }
+            yield* tx.update(IssueMetadataSnapshotTable).set({ snapshot: next, time_updated: now }).where(and(
+              eq(IssueMetadataSnapshotTable.connection_id, connectionID),
+              eq(IssueMetadataSnapshotTable.credential_generation, claim.credentialGeneration),
+            )).run()
+            yield* tx.update(IssueMetadataSyncTable).set({
+              completed_generation: claim.generation,
+              lease_token: null,
+              lease_until: null,
+              last_error: null,
+              retry_after: null,
+              next_due_at: nextDue(connectionID, scope, now),
+              time_updated: now,
+            }).where(and(
+              eq(IssueMetadataSyncTable.connection_id, connectionID),
+              eq(IssueMetadataSyncTable.scope, scope),
+              eq(IssueMetadataSyncTable.lease_token, claim.token),
+            )).run()
+            return "succeeded" as const
+          }
+          const error = result.failure
+          yield* tx.update(IssueMetadataSyncTable).set({
+            completed_generation: claim.generation,
+            lease_token: null,
+            lease_until: null,
+            last_error: metadataError(error),
+            retry_after: now + MetadataRetryCooldown,
+            next_due_at: now + MetadataRetryCooldown,
+            time_updated: now,
+          }).where(and(
+            eq(IssueMetadataSyncTable.connection_id, connectionID),
+            eq(IssueMetadataSyncTable.scope, scope),
+            eq(IssueMetadataSyncTable.lease_token, claim.token),
+          )).run()
+          return error._tag === "IssueProvider.AuthenticationError"
+            ? "authentication_failed" as const
+            : "provider_failed" as const
+        }), { behavior: "immediate" }).pipe(Effect.orDie)),
+        Effect.tap((outcome) => Effect.logInfo("issue metadata sync completed", {
+          integrationID: adapter.integrationID,
+          connectionID,
+          scope,
+          reason,
+          outcome,
+          durationMs: Date.now() - startedAt,
+          generation: claim.generation,
+          credentialGeneration: claim.credentialGeneration,
+        })),
+        Effect.withSpan("IssueWatcher.metadata.sync", { attributes: {
+          integrationID: adapter.integrationID,
+          connectionID,
+          scope,
+          reason,
+          generation: claim.generation,
+          credentialGeneration: claim.credentialGeneration,
+        } }),
+        Effect.forkIn(serviceScope),
+      )
+      return true
+    })
+
+    const scheduleMetadata = Effect.fnUntraced(function* (
+      integrationID: Integration.ID,
+      connectionID: Credential.ConnectionID,
+      reason: string,
+      projects: "cached" | ReadonlyArray<string>,
+      force = true,
+    ) {
+      const adapter = yield* provider(integrationID)
+      yield* ownedConnection(integrationID, connectionID)
+      yield* requestMetadataScope(connectionID, "global", force)
+      yield* runMetadataScope(adapter, connectionID, "global", reason)
+      const keys = projects === "cached" ? Object.keys((yield* metadataSnapshot(connectionID))?.projects ?? {}) : projects
+      yield* Effect.forEach([...new Set(keys)], (key) => Effect.gen(function* () {
+        const scope = `project:${key}`
+        yield* requestMetadataScope(connectionID, scope, force)
+        yield* runMetadataScope(adapter, connectionID, scope, reason)
+      }), { concurrency: 4 })
     })
 
     const storedRun = (row: typeof IssueWatcherRunTable.$inferSelect) => decodeRun({
@@ -545,6 +885,7 @@ const layer = Layer.effect(
         .where(and(eq(IssueWatcherTable.integration_id, adapter.integrationID), isNull(IssueWatcherTable.archived_at)))
         .all()
         .pipe(Effect.orDie)).map(stored)
+      const lastPollAt = watchers.flatMap((watcher) => (watcher.lastRunAt ? [watcher.lastRunAt] : [])).toSorted().at(-1)
       return Schema.decodeUnknownSync(IssueWatcher.IntegrationSummary)({
         integration: {
           id: adapter.integrationID,
@@ -564,9 +905,7 @@ const layer = Layer.effect(
             }
           : {}),
         watcherCount: watchers.length,
-        ...(watchers.flatMap((watcher) => (watcher.lastRunAt ? [watcher.lastRunAt] : [])).toSorted().at(-1)
-          ? { lastPollAt: watchers.flatMap((watcher) => (watcher.lastRunAt ? [watcher.lastRunAt] : [])).toSorted().at(-1) }
-          : {}),
+        ...(lastPollAt ? { lastPollAt: lastPollAt.epochMilliseconds } : {}),
         owner: ownerStatus(),
       })
     })
@@ -1071,11 +1410,10 @@ const layer = Layer.effect(
               Effect.succeed({ result: { ok: false, detail: "Verification failed" }, status: "needs_auth" as const }),
             ),
           )
-          yield* credentials.rotateConnection(saved.connectionID, {
-            value: Credential.Key.make({
-              ...saved.value,
-              verification: { status: result.status, detail: result.result.detail, checkedAt },
-            }),
+          yield* credentials.updateConnectionHealth(saved.connectionID, {
+            status: result.status,
+            detail: result.result.detail,
+            checkedAt,
           }).pipe(Effect.mapError(() => new ConnectionNotFoundError({ connectionID: saved.connectionID! })))
           return result.result
         }),
@@ -1086,13 +1424,18 @@ const layer = Layer.effect(
             adapter,
             Credential.Key.make({ type: "key", key: input.key, inputs: input.inputs }),
           )
+          const connectionID = Credential.ConnectionID.create()
           yield* credentials.createConnection({
             integrationID,
-            connectionID: Credential.ConnectionID.create(),
+            connectionID,
             tenantIdentity,
             value: verified.value,
             label: input.label,
           })
+          yield* scheduleMetadata(integrationID, connectionID, "initial", []).pipe(
+            Effect.ignore,
+            Effect.forkIn(serviceScope),
+          )
           return yield* projectSource(adapter)
         }),
         rotate: Effect.fn("IssueWatcher.source.rotate")(function* (integrationID, connectionID, input) {
@@ -1110,11 +1453,61 @@ const layer = Layer.effect(
           yield* credentials
             .rotateConnection(connectionID, { value: verified.value, label: input.label })
             .pipe(Effect.mapError(() => new ConnectionNotFoundError({ connectionID })))
+          yield* scheduleMetadata(integrationID, connectionID, "rotation", "cached").pipe(
+            Effect.ignore,
+            Effect.forkIn(serviceScope),
+          )
           return yield* projectSource(adapter)
         }),
         metadata: Effect.fn("IssueWatcher.source.metadata")(function* (integrationID, connectionID, input) {
           const adapter = yield* provider(integrationID)
-          return yield* adapter.metadata(yield* ownedConnection(integrationID, connectionID), input)
+          yield* ownedConnection(integrationID, connectionID)
+          const snapshot = yield* metadataSnapshot(connectionID)
+          const now = Date.now()
+          const projectKeys = [...new Set(input.issueProjects)]
+          const staleGlobal = !snapshot?.global || now - snapshot.global.syncedAt >= MetadataFreshness
+          const staleProjects = projectKeys.filter((key) => !snapshot?.projects[key] || now - snapshot.projects[key].syncedAt >= MetadataFreshness)
+          if (staleGlobal) {
+            yield* requestMetadataScope(connectionID, "global", false)
+            yield* runMetadataScope(adapter, connectionID, "global", "stale_read")
+          }
+          yield* Effect.forEach(staleProjects, (key) => Effect.gen(function* () {
+            const scope = `project:${key}`
+            yield* requestMetadataScope(connectionID, scope, false)
+            yield* runMetadataScope(adapter, connectionID, scope, "project_selection")
+          }), { concurrency: 4 })
+          yield* Effect.yieldNow
+          const view = yield* metadataView(connectionID)
+          const finalSnapshot = view.snapshot
+          const finalNow = Date.now()
+          const finalStaleGlobal = !finalSnapshot?.global || finalNow - finalSnapshot.global.syncedAt >= MetadataFreshness
+          const finalStaleProjects = projectKeys.filter((key) =>
+            !finalSnapshot?.projects[key] || finalNow - finalSnapshot.projects[key].syncedAt >= MetadataFreshness)
+          const projects = projectKeys.length === 0
+            ? Object.values(finalSnapshot?.projects ?? {})
+            : projectKeys.flatMap((key) => finalSnapshot?.projects[key] ? [finalSnapshot.projects[key]] : [])
+          return IssueWatcher.MetadataResult.make({
+            metadata: {
+              projects: finalSnapshot?.global?.projects ?? [],
+              users: uniqueMetadataOptions(projects.flatMap((project) => project.users)),
+              labels: finalSnapshot?.global?.labels ?? [],
+              statuses: uniqueMetadataOptions(projects.flatMap((project) => project.statuses)),
+              components: uniqueMetadataOptions(projects.flatMap((project) => project.components)),
+              issueTypes: uniqueMetadataOptions(projects.flatMap((project) => project.issueTypes)),
+              fields: finalSnapshot?.global?.fields ?? [],
+            },
+            ...(finalSnapshot?.global ? { syncedAt: finalSnapshot.global.syncedAt } : {}),
+            stale: finalStaleGlobal || finalStaleProjects.length > 0,
+            syncing: view.status.syncing,
+            refreshingProjectKeys: view.status.refreshingProjectKeys,
+            missingProjectKeys: projectKeys.filter((key) => !finalSnapshot?.projects[key]),
+            ...(view.status.lastAttemptAt === undefined ? {} : { lastAttemptAt: view.status.lastAttemptAt }),
+            ...(view.status.syncError === undefined ? {} : { syncError: view.status.syncError }),
+          })
+        }),
+        syncMetadata: Effect.fn("IssueWatcher.source.syncMetadata")(function* (integrationID, connectionID) {
+          yield* scheduleMetadata(integrationID, connectionID, "manual", "cached")
+          return yield* metadataStatus(connectionID)
         }),
       },
       summary: inboxSummary,
@@ -1487,6 +1880,28 @@ const layer = Layer.effect(
         }
         yield* Effect.sleep("1 second")
       }).pipe(Effect.forever, Effect.ignore, Effect.forkScoped)
+      yield* Effect.gen(function* () {
+        const now = Date.now()
+        const due = yield* db.select({
+          connectionID: IssueMetadataSyncTable.connection_id,
+          scope: IssueMetadataSyncTable.scope,
+          integrationID: CredentialTable.integration_id,
+        }).from(IssueMetadataSyncTable).innerJoin(
+          CredentialTable,
+          eq(IssueMetadataSyncTable.connection_id, CredentialTable.connection_id),
+        ).where(and(
+          lte(IssueMetadataSyncTable.next_due_at, now),
+          or(isNull(IssueMetadataSyncTable.retry_after), lte(IssueMetadataSyncTable.retry_after, now)),
+          or(isNull(IssueMetadataSyncTable.lease_until), lte(IssueMetadataSyncTable.lease_until, now)),
+        )).all().pipe(Effect.orDie)
+        yield* Effect.forEach(due, (item) => Effect.gen(function* () {
+          if (!item.integrationID) return
+          const adapter = yield* provider(item.integrationID)
+          yield* requestMetadataScope(item.connectionID, item.scope, false)
+          yield* runMetadataScope(adapter, item.connectionID, item.scope, "scheduled")
+        }).pipe(Effect.catch(() => Effect.void)), { concurrency: 4 })
+        yield* Effect.sleep(MetadataSchedulerInterval)
+      }).pipe(Effect.forever, Effect.ignore, Effect.forkScoped)
     })
 
     return service
@@ -1498,3 +1913,7 @@ export const node = makeGlobalNode({
   layer,
   deps: [Database.node, EventV2.node, GlobalConfig.node, Credential.node, IssueProvider.node, IssueWatcherOwner.node, ProjectRoutingCatalog.node, WorkspaceProvisioner.node, SessionV2.node],
 })
+
+function uniqueMetadataOptions(options: ReadonlyArray<IssueWatcher.MetadataOption>) {
+  return [...new Map(options.map((option) => [option.id, option])).values()].toSorted((left, right) => left.name.localeCompare(right.name))
+}

@@ -13,8 +13,8 @@ import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, Scope } from "effe
 import { Issue } from "@opencode-ai/schema/issue"
 import { Project } from "@opencode-ai/schema/project"
 import { testEffect } from "./lib/effect"
-import { IssueMatchTable, IssueMaterializationTable, IssueWatcherIgnoreTable, IssueWatcherRunTable } from "@opencode-ai/core/issue-watcher/sql"
-import { eq } from "drizzle-orm"
+import { IssueMatchTable, IssueMaterializationTable, IssueMetadataSnapshotTable, IssueMetadataSyncTable, IssueWatcherIgnoreTable, IssueWatcherRunTable } from "@opencode-ai/core/issue-watcher/sql"
+import { and, eq } from "drizzle-orm"
 import { EventV2 } from "@opencode-ai/core/event"
 import { IssueMatch } from "@opencode-ai/schema/issue-match"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
@@ -161,6 +161,320 @@ describe("IssueWatcher pure pipeline", () => {
 describe("IssueWatcher", () => {
   const it = testEffect(layer())
 
+  it.effect("serves stale metadata immediately and single-flights scoped refreshes", () =>
+    Effect.gen(function* () {
+      const integrationID = Integration.ID.make("metadata-cache")
+      const connectionID = Credential.ConnectionID.make("icn_metadata-cache")
+      const globalStarted = yield* Deferred.make<void>()
+      const projectStarted = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const scope = yield* Scope.make()
+      let globalCalls = 0
+      let projectCalls = 0
+      yield* (yield* IssueProvider.Service).register({
+        integrationID,
+        name: "Metadata cache",
+        method: { type: "key" },
+        tenantIdentity: () => Effect.succeed("example.com"),
+        verify: () => Effect.succeed({ ok: true, detail: "connected" }),
+        metadataGlobal: () => Effect.gen(function* () {
+          globalCalls++
+          yield* Deferred.succeed(globalStarted, undefined)
+          yield* Deferred.await(release)
+          return { projects: [], labels: [], fields: [] }
+        }),
+        metadataProject: () => Effect.gen(function* () {
+          projectCalls++
+          yield* Deferred.succeed(projectStarted, undefined)
+          yield* Deferred.await(release)
+          return { users: [], statuses: [], components: [], issueTypes: [] }
+        }),
+        search: () => Effect.succeed({ issues: [], cursor: "cursor" }),
+        get: () => Effect.die("unused"),
+        comment: () => new IssueProvider.NotImplementedError({ operation: "comment" }),
+        transition: () => new IssueProvider.NotImplementedError({ operation: "transition" }),
+      }).pipe(Scope.provide(scope))
+      const storedCredential = yield* (yield* Credential.Service).createConnection({
+        integrationID,
+        connectionID,
+        tenantIdentity: "example.com",
+        value: Credential.Key.make({ type: "key", key: "secret" }),
+      })
+      const syncedAt = Date.now() - IssueWatcher.MetadataFreshness - 1
+      const database = yield* Database.Service
+      yield* database.db.update(IssueMetadataSnapshotTable).set({
+        snapshot: {
+          connectionID,
+          global: {
+            projects: [{ id: "1", key: "ENG", name: "Engineering" }],
+            labels: ["cached"],
+            fields: [],
+            syncedAt,
+          },
+          projects: {
+            ENG: {
+              users: [{ id: "user-1", name: "Ada" }],
+              statuses: [],
+              components: [],
+              issueTypes: [],
+              syncedAt,
+            },
+          },
+          updatedAt: syncedAt,
+        },
+        time_updated: syncedAt,
+      }).where(eq(IssueMetadataSnapshotTable.connection_id, connectionID)).run().pipe(Effect.orDie)
+      const service = yield* IssueWatcher.Service
+      const first = yield* service.source.metadata(integrationID, connectionID, { issueProjects: ["ENG"] })
+      expect(first).toMatchObject({
+        metadata: { labels: ["cached"], users: [{ id: "user-1", name: "Ada" }] },
+        stale: true,
+        syncing: true,
+        refreshingProjectKeys: ["ENG"],
+        missingProjectKeys: [],
+      })
+      const accumulated = yield* service.source.metadata(integrationID, connectionID, { issueProjects: [] })
+      expect(accumulated.metadata.users).toEqual([{ id: "user-1", name: "Ada" }])
+      yield* Effect.all([Deferred.await(globalStarted), Deferred.await(projectStarted)])
+      yield* Effect.all([
+        service.source.metadata(integrationID, connectionID, { issueProjects: ["ENG"] }),
+        service.source.syncMetadata(integrationID, connectionID),
+      ])
+      expect(globalCalls).toBe(1)
+      expect(projectCalls).toBe(1)
+      yield* Deferred.succeed(release, undefined)
+      yield* (yield* Credential.Service).remove(storedCredential.id)
+      expect(yield* database.db.select().from(IssueMetadataSnapshotTable)
+        .where(eq(IssueMetadataSnapshotTable.connection_id, connectionID)).get().pipe(Effect.orDie)).toBeUndefined()
+      yield* Scope.close(scope, Exit.void)
+    }),
+  )
+
+  it.effect("returns the completed snapshot from an immediate metadata provider", () =>
+    Effect.gen(function* () {
+      const integrationID = Integration.ID.make("metadata-immediate")
+      const connectionID = Credential.ConnectionID.make("icn_metadata-immediate")
+      const scope = yield* Scope.make()
+      yield* (yield* IssueProvider.Service).register({
+        integrationID,
+        name: "Immediate metadata",
+        method: { type: "key" },
+        tenantIdentity: () => Effect.succeed("example.com"),
+        verify: () => Effect.succeed({ ok: true, detail: "connected" }),
+        metadataGlobal: () => Effect.succeed({
+          projects: [{ id: "1", key: "ENG", name: "Engineering" }],
+          labels: ["fresh"],
+          fields: [],
+        }),
+        metadataProject: () => Effect.succeed({ users: [], statuses: [], components: [], issueTypes: [] }),
+        search: () => Effect.succeed({ issues: [], cursor: "cursor" }),
+        get: () => Effect.die("unused"),
+        comment: () => new IssueProvider.NotImplementedError({ operation: "comment" }),
+        transition: () => new IssueProvider.NotImplementedError({ operation: "transition" }),
+      }).pipe(Scope.provide(scope))
+      yield* (yield* Credential.Service).createConnection({
+        integrationID,
+        connectionID,
+        tenantIdentity: "example.com",
+        value: Credential.Key.make({ type: "key", key: "secret" }),
+      })
+
+      const result = yield* (yield* IssueWatcher.Service).source.metadata(integrationID, connectionID, {
+        issueProjects: [],
+      })
+
+      expect(result).toMatchObject({
+        metadata: { labels: ["fresh"] },
+        stale: false,
+        syncing: false,
+      })
+      yield* Scope.close(scope, Exit.void)
+    }),
+  )
+
+  it.effect("fences old credential metadata and immediately follows rotation with the new credential", () =>
+    Effect.gen(function* () {
+      const integrationID = Integration.ID.make("metadata-rotation")
+      const connectionID = Credential.ConnectionID.make("icn_metadata-rotation")
+      const oldStarted = yield* Deferred.make<void>()
+      const releaseOld = yield* Deferred.make<void>()
+      const newCompleted = yield* Deferred.make<void>()
+      const scope = yield* Scope.make()
+      yield* (yield* IssueProvider.Service).register({
+        integrationID,
+        name: "Metadata rotation",
+        method: { type: "key" },
+        tenantIdentity: () => Effect.succeed("example.com"),
+        verify: () => Effect.succeed({ ok: true, detail: "connected" }),
+        metadataGlobal: (credential) => Effect.gen(function* () {
+          if (credential.key === "old") {
+            yield* Deferred.succeed(oldStarted, undefined)
+            yield* Deferred.await(releaseOld)
+            return { projects: [], labels: ["old"], fields: [] }
+          }
+          yield* Deferred.succeed(newCompleted, undefined)
+          return { projects: [], labels: ["new"], fields: [] }
+        }),
+        metadataProject: () => Effect.succeed({ users: [], statuses: [], components: [], issueTypes: [] }),
+        search: () => Effect.succeed({ issues: [], cursor: "cursor" }),
+        get: () => Effect.die("unused"),
+        comment: () => new IssueProvider.NotImplementedError({ operation: "comment" }),
+        transition: () => new IssueProvider.NotImplementedError({ operation: "transition" }),
+      }).pipe(Scope.provide(scope))
+      yield* (yield* Credential.Service).createConnection({
+        integrationID,
+        connectionID,
+        tenantIdentity: "example.com",
+        value: Credential.Key.make({ type: "key", key: "old", inputs: {} }),
+      })
+      const service = yield* IssueWatcher.Service
+      yield* service.source.metadata(integrationID, connectionID, { issueProjects: [] })
+      yield* Deferred.await(oldStarted)
+      const rotated = yield* service.source.rotate(integrationID, connectionID, { key: "new", inputs: {} })
+      expect(rotated.connection?.id).toBe(connectionID)
+      yield* Deferred.succeed(releaseOld, undefined)
+      yield* Deferred.await(newCompleted)
+      yield* Effect.yieldNow
+      const result = yield* service.source.metadata(integrationID, connectionID, { issueProjects: [] })
+      expect(result.metadata.labels).toEqual(["new"])
+      const sync = yield* (yield* Database.Service).db.select().from(IssueMetadataSyncTable).where(and(
+        eq(IssueMetadataSyncTable.connection_id, connectionID),
+        eq(IssueMetadataSyncTable.scope, "global"),
+      )).get().pipe(Effect.orDie)
+      expect(sync?.credential_generation).toBe(1)
+      expect(sync?.completed_generation).toBe(sync?.requested_generation)
+      yield* Scope.close(scope, Exit.void)
+    }),
+  )
+
+  it.effect("saved credential verification updates health without invalidating metadata", () =>
+    Effect.gen(function* () {
+      const integrationID = Integration.ID.make("metadata-health-check")
+      const connectionID = Credential.ConnectionID.make("icn_metadata-health-check")
+      const scope = yield* Scope.make()
+      yield* (yield* IssueProvider.Service).register({
+        integrationID,
+        name: "Metadata health check",
+        method: { type: "key" },
+        tenantIdentity: () => Effect.succeed("example.com"),
+        verify: () => Effect.succeed({ ok: true, detail: "healthy" }),
+        metadataGlobal: () => Effect.succeed({ projects: [], labels: [], fields: [] }),
+        metadataProject: () => Effect.succeed({ users: [], statuses: [], components: [], issueTypes: [] }),
+        search: () => Effect.succeed({ issues: [], cursor: "cursor" }),
+        get: () => Effect.die("unused"),
+        comment: () => new IssueProvider.NotImplementedError({ operation: "comment" }),
+        transition: () => new IssueProvider.NotImplementedError({ operation: "transition" }),
+      }).pipe(Scope.provide(scope))
+      const credentials = yield* Credential.Service
+      yield* credentials.createConnection({
+        integrationID,
+        connectionID,
+        tenantIdentity: "example.com",
+        value: Credential.Key.make({ type: "key", key: "secret", inputs: {} }),
+      })
+      const database = yield* Database.Service
+      const before = yield* database.db.select().from(IssueMetadataSyncTable)
+        .where(eq(IssueMetadataSyncTable.connection_id, connectionID)).get().pipe(Effect.orDie)
+      expect(yield* (yield* IssueWatcher.Service).source.verify(integrationID, {
+        inputs: {},
+        useSavedConnection: true,
+      })).toEqual({ ok: true, detail: "healthy" })
+      const after = yield* database.db.select().from(IssueMetadataSyncTable)
+        .where(eq(IssueMetadataSyncTable.connection_id, connectionID)).get().pipe(Effect.orDie)
+      expect(after?.credential_generation).toBe(before?.credential_generation)
+      expect(after?.requested_generation).toBe(before?.requested_generation)
+      expect((yield* credentials.getConnection(connectionID))?.value).toMatchObject({
+        key: "secret",
+        verification: { status: "connected", detail: "healthy" },
+      })
+      yield* Scope.close(scope, Exit.void)
+    }),
+  )
+
+  it.effect("persists failed-scope cooldown so status polling does not retry provider work", () =>
+    Effect.gen(function* () {
+      const integrationID = Integration.ID.make("metadata-cooldown")
+      const connectionID = Credential.ConnectionID.make("icn_metadata-cooldown")
+      const scope = yield* Scope.make()
+      const failed = yield* Deferred.make<void>()
+      let calls = 0
+      yield* (yield* IssueProvider.Service).register({
+        integrationID,
+        name: "Metadata cooldown",
+        method: { type: "key" },
+        tenantIdentity: () => Effect.succeed("example.com"),
+        verify: () => Effect.succeed({ ok: true, detail: "connected" }),
+        metadataGlobal: () => Effect.gen(function* () {
+          calls++
+          yield* Deferred.succeed(failed, undefined)
+          return yield* new IssueProvider.RequestError({ detail: "unavailable" })
+        }),
+        metadataProject: () => Effect.succeed({ users: [], statuses: [], components: [], issueTypes: [] }),
+        search: () => Effect.succeed({ issues: [], cursor: "cursor" }),
+        get: () => Effect.die("unused"),
+        comment: () => new IssueProvider.NotImplementedError({ operation: "comment" }),
+        transition: () => new IssueProvider.NotImplementedError({ operation: "transition" }),
+      }).pipe(Scope.provide(scope))
+      yield* (yield* Credential.Service).createConnection({
+        integrationID,
+        connectionID,
+        tenantIdentity: "example.com",
+        value: Credential.Key.make({ type: "key", key: "secret", inputs: {} }),
+      })
+      const service = yield* IssueWatcher.Service
+      yield* service.source.metadata(integrationID, connectionID, { issueProjects: [] })
+      yield* Deferred.await(failed)
+      yield* Effect.yieldNow
+      yield* Effect.forEach(Array.from({ length: 5 }), () =>
+        service.source.metadata(integrationID, connectionID, { issueProjects: [] }))
+      expect(calls).toBe(1)
+      const status = yield* service.source.metadata(integrationID, connectionID, { issueProjects: [] })
+      expect(status.syncError).toBe("global: unavailable")
+      expect(status.syncing).toBe(false)
+      yield* Scope.close(scope, Exit.void)
+    }),
+  )
+
+  it.effect("keeps failed project status after a later scope succeeds", () =>
+    Effect.gen(function* () {
+      const integrationID = Integration.ID.make("metadata-partial-failure")
+      const connectionID = Credential.ConnectionID.make("icn_metadata-partial-failure")
+      const scope = yield* Scope.make()
+      const completed = yield* Deferred.make<void>()
+      yield* (yield* IssueProvider.Service).register({
+        integrationID,
+        name: "Metadata partial failure",
+        method: { type: "key" },
+        tenantIdentity: () => Effect.succeed("example.com"),
+        verify: () => Effect.succeed({ ok: true, detail: "connected" }),
+        metadataGlobal: () => Effect.succeed({ projects: [], labels: [], fields: [] }),
+        metadataProject: (_credential, projectKey) => Effect.gen(function* () {
+          if (projectKey === "ENG") return yield* new IssueProvider.RequestError({ detail: "ENG unavailable" })
+          yield* Deferred.succeed(completed, undefined)
+          return { users: [], statuses: [], components: [], issueTypes: [] }
+        }),
+        search: () => Effect.succeed({ issues: [], cursor: "cursor" }),
+        get: () => Effect.die("unused"),
+        comment: () => new IssueProvider.NotImplementedError({ operation: "comment" }),
+        transition: () => new IssueProvider.NotImplementedError({ operation: "transition" }),
+      }).pipe(Scope.provide(scope))
+      yield* (yield* Credential.Service).createConnection({
+        integrationID,
+        connectionID,
+        tenantIdentity: "example.com",
+        value: Credential.Key.make({ type: "key", key: "secret", inputs: {} }),
+      })
+      const service = yield* IssueWatcher.Service
+      yield* service.source.metadata(integrationID, connectionID, { issueProjects: ["ENG", "OPS"] })
+      yield* Deferred.await(completed)
+      yield* Effect.yieldNow
+      const status = yield* service.source.metadata(integrationID, connectionID, { issueProjects: ["ENG", "OPS"] })
+      expect(status.syncError).toBe("project:ENG: ENG unavailable")
+      expect(status.metadata.users).toEqual([])
+      yield* Scope.close(scope, Exit.void)
+    }),
+  )
+
   it.effect("creates, reads, lists, updates, enables, and archives watchers", () =>
     Effect.gen(function* () {
       const service = yield* IssueWatcher.Service
@@ -265,7 +579,8 @@ describe("IssueWatcher", () => {
         method: { type: "key" },
         tenantIdentity: () => Effect.succeed("github.com"),
         verify: () => Effect.succeed({ ok: true, detail: "connected" }),
-        metadata: () => Effect.succeed({ projects: [], users: [], labels: [], statuses: [], components: [], issueTypes: [], fields: [] }),
+        metadataGlobal: () => Effect.succeed({ projects: [], labels: [], fields: [] }),
+        metadataProject: () => Effect.succeed({ users: [], statuses: [], components: [], issueTypes: [] }),
         search: ({ page }) => {
           pages.push(page)
           const offset = page ? Number(page) : 0
@@ -318,7 +633,8 @@ describe("IssueWatcher", () => {
         method: { type: "key" },
         tenantIdentity: () => Effect.succeed("github.com"),
         verify: () => Effect.succeed({ ok: true, detail: "connected" }),
-        metadata: () => Effect.succeed({ projects: [], users: [], labels: [], statuses: [], components: [], issueTypes: [], fields: [] }),
+        metadataGlobal: () => Effect.succeed({ projects: [], labels: [], fields: [] }),
+        metadataProject: () => Effect.succeed({ users: [], statuses: [], components: [], issueTypes: [] }),
         search: ({ cursor, page }) => {
           pages.push({ cursor, page })
           if (!authenticated) return new IssueProvider.AuthenticationError({ detail: "expired" })
@@ -342,6 +658,8 @@ describe("IssueWatcher", () => {
 
       const first = yield* service.run(watcher.id)
       expect(first).toMatchObject({ outcome: "ok", scanned: 2, matched: 2, unrouted: 2 })
+      expect((yield* service.source.list()).find((source) => source.integration.id === integrationID)?.lastPollAt)
+        .toEqual((yield* service.get(watcher.id)).lastRunAt)
       expect((yield* service.inbox({})).items).toHaveLength(2)
       expect((yield* service.history(watcher.id, {})).items.filter((item) => item.type === "observation")).toHaveLength(2)
 
@@ -381,7 +699,8 @@ describe("IssueWatcher", () => {
         method: { type: "key" },
         tenantIdentity: () => Effect.succeed("example.com"),
         verify: () => Effect.succeed({ ok: true, detail: "connected" }),
-        metadata: () => Effect.succeed({ projects: [], users: [], labels: [], statuses: [], components: [], issueTypes: [], fields: [] }),
+        metadataGlobal: () => Effect.succeed({ projects: [], labels: [], fields: [] }),
+        metadataProject: () => Effect.succeed({ users: [], statuses: [], components: [], issueTypes: [] }),
         search: ({ page }) => Effect.succeed(page
           ? { issues: [], cursor: "starting-cursor" }
           : { issues: [issue], cursor: "advanced-cursor", nextPage: "empty" }),
@@ -438,7 +757,8 @@ describe("IssueWatcher", () => {
         method: { type: "key" },
         tenantIdentity: () => Effect.succeed("example.com"),
         verify: () => Effect.succeed({ ok: true, detail: "connected" }),
-        metadata: () => Effect.succeed({ projects: [], users: [], labels: [], statuses: [], components: [], issueTypes: [], fields: [] }),
+        metadataGlobal: () => Effect.succeed({ projects: [], labels: [], fields: [] }),
+        metadataProject: () => Effect.succeed({ users: [], statuses: [], components: [], issueTypes: [] }),
         search: () => Effect.succeed({
           issues: [
             Issue.Info.make({ ...issue, title: `Ignored ${revision}` }),
@@ -511,7 +831,8 @@ describe("IssueWatcher", () => {
         method: { type: "key" },
         tenantIdentity: () => Effect.succeed("example.com"),
         verify: () => Effect.succeed({ ok: true, detail: "connected" }),
-        metadata: () => Effect.succeed({ projects: [], users: [], labels: [], statuses: [], components: [], issueTypes: [], fields: [] }),
+        metadataGlobal: () => Effect.succeed({ projects: [], labels: [], fields: [] }),
+        metadataProject: () => Effect.succeed({ users: [], statuses: [], components: [], issueTypes: [] }),
         search: () => {
           searches++
           return Deferred.succeed(started, undefined).pipe(
@@ -566,7 +887,8 @@ describe("IssueWatcher", () => {
         method: { type: "key" },
         tenantIdentity: () => Effect.succeed("example.com"),
         verify: () => Effect.succeed({ ok: true, detail: "connected" }),
-        metadata: () => Effect.succeed({ projects: [], users: [], labels: [], statuses: [], components: [], issueTypes: [], fields: [] }),
+        metadataGlobal: () => Effect.succeed({ projects: [], labels: [], fields: [] }),
+        metadataProject: () => Effect.succeed({ users: [], statuses: [], components: [], issueTypes: [] }),
         search: () => Deferred.succeed(started, undefined).pipe(
           Effect.andThen(Deferred.await(release)),
           Effect.andThen(new IssueProvider.AuthenticationError({ detail: "expired request" })),

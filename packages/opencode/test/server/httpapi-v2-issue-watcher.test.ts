@@ -87,6 +87,20 @@ describe("v2 issue watcher HttpApi", () => {
       json("POST", { key: "secret", inputs: {}, useSavedConnection: true }),
     )
     expect(invalid.status).toBe(400)
+
+    const metadata = await request(
+      "/api/issue-watcher/integrations/jira/connection/icn_missing/metadata",
+      json("POST", { issueProjects: [] }),
+    )
+    expect(metadata.status).toBe(404)
+    expect(await metadata.json()).toMatchObject({ _tag: "IssueIntegrationConnectionNotFoundError" })
+
+    const sync = await request(
+      "/api/issue-watcher/integrations/jira/connection/icn_missing/metadata/sync",
+      { method: "POST" },
+    )
+    expect(sync.status).toBe(404)
+    expect(await sync.json()).toMatchObject({ _tag: "IssueIntegrationConnectionNotFoundError" })
   })
 
   test("manages global watchers without location transport", async () => {

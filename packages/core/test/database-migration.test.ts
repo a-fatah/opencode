@@ -27,6 +27,8 @@ import sessionMetadataMigration from "@opencode-ai/core/database/migration/20260
 import workspaceProvisionerMigration from "@opencode-ai/core/database/migration/20260729205734_workspace_provisioner"
 import workspaceProvisionerSafetyMigration from "@opencode-ai/core/database/migration/20260729211734_workspace_provisioner_safety"
 import workspaceProvisionerRecoveryMigration from "@opencode-ai/core/database/migration/20260730090000_workspace_provisioner_recovery"
+import issueMetadataSnapshotMigration from "@opencode-ai/core/database/migration/20260730094236_issue_metadata_snapshot"
+import issueMetadataCoordinationMigration from "@opencode-ai/core/database/migration/20260730100139_issue_metadata_coordination"
 import type { SqlClient as SqlClientService } from "effect/unstable/sql/SqlClient"
 import { Database } from "@opencode-ai/core/database/database"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
@@ -202,6 +204,52 @@ describe("DatabaseMigration", () => {
         expect(yield* db.get(sql`SELECT connector_id, method_id, active FROM credential WHERE id = 'current'`)).toEqual(
           { connector_id: null, method_id: null, active: null },
         )
+      }),
+    )
+  })
+
+  test("backfills connected credentials for metadata discovery on restart", async () => {
+    await run(
+      Effect.gen(function* () {
+        const db = yield* makeDb
+        yield* db.run(sql`
+          CREATE TABLE credential (
+            id text PRIMARY KEY,
+            integration_id text,
+            connection_id text,
+            label text NOT NULL,
+            value text NOT NULL,
+            time_created integer NOT NULL,
+            time_updated integer NOT NULL
+          )
+        `)
+        yield* db.run(sql`
+          INSERT INTO credential (id, integration_id, connection_id, label, value, time_created, time_updated)
+          VALUES ('connected', 'jira', 'icn_existing', 'Existing', '{}', 1, 1),
+                 ('legacy', 'legacy', NULL, 'Legacy', '{}', 1, 1)
+        `)
+
+        yield* DatabaseMigration.applyOnly(db, [issueMetadataSnapshotMigration, issueMetadataCoordinationMigration])
+
+        expect(yield* db.all(sql`
+          SELECT s.connection_id AS connectionID, c.integration_id AS integrationID,
+            json_extract(s.snapshot, '$.connectionID') AS snapshotConnectionID,
+            y.scope, y.requested_generation AS requestedGeneration, y.completed_generation AS completedGeneration,
+            y.next_due_at AS nextDueAt
+          FROM issue_metadata_snapshot s
+          JOIN issue_metadata_sync y ON y.connection_id = s.connection_id
+          JOIN credential c ON c.connection_id = y.connection_id
+          WHERE y.next_due_at <= ${Date.now()}
+          ORDER BY s.connection_id
+        `)).toEqual([{
+          connectionID: "icn_existing",
+          integrationID: "jira",
+          snapshotConnectionID: "icn_existing",
+          scope: "global",
+          requestedGeneration: 1,
+          completedGeneration: 0,
+          nextDueAt: expect.any(Number),
+        }])
       }),
     )
   })

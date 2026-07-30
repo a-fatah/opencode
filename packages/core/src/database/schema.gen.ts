@@ -174,6 +174,33 @@ export default {
         );
       `)
       yield* tx.run(`
+        CREATE TABLE \`issue_metadata_snapshot\` (
+          \`connection_id\` text PRIMARY KEY,
+          \`snapshot\` text NOT NULL,
+          \`credential_generation\` integer DEFAULT 0 NOT NULL,
+          \`time_created\` integer NOT NULL,
+          \`time_updated\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
+        CREATE TABLE \`issue_metadata_sync\` (
+          \`connection_id\` text NOT NULL,
+          \`scope\` text NOT NULL,
+          \`requested_generation\` integer DEFAULT 0 NOT NULL,
+          \`completed_generation\` integer DEFAULT 0 NOT NULL,
+          \`credential_generation\` integer DEFAULT 0 NOT NULL,
+          \`lease_token\` text,
+          \`lease_until\` integer,
+          \`last_attempt_at\` integer,
+          \`last_error\` text,
+          \`retry_after\` integer,
+          \`next_due_at\` integer NOT NULL,
+          \`time_created\` integer NOT NULL,
+          \`time_updated\` integer NOT NULL,
+          CONSTRAINT \`issue_metadata_sync_pk\` PRIMARY KEY(\`connection_id\`, \`scope\`)
+        );
+      `)
+      yield* tx.run(`
         CREATE TABLE \`issue_session_claim\` (
           \`connection_id\` text NOT NULL,
           \`external_id\` text NOT NULL,
@@ -472,6 +499,7 @@ export default {
       yield* tx.run(
         `CREATE UNIQUE INDEX \`issue_materialization_match_active_uidx\` ON \`issue_materialization\` (\`match_id\`) WHERE "issue_materialization"."state" not in ('completed', 'failed', 'cancelled');`,
       )
+      yield* tx.run(`CREATE INDEX \`issue_metadata_sync_due_idx\` ON \`issue_metadata_sync\` (\`next_due_at\`);`)
       yield* tx.run(
         `CREATE UNIQUE INDEX \`issue_session_claim_materialization_uidx\` ON \`issue_session_claim\` (\`materialization_id\`);`,
       )

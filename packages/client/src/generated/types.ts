@@ -540,18 +540,39 @@ export type IssueWatchersMetadataInput = {
 }
 
 export type IssueWatchersMetadataOutput = {
-  readonly projects: ReadonlyArray<{
-    readonly id: string
-    readonly key: string
-    readonly name: string
-    readonly imageUrl?: string
-  }>
-  readonly users: ReadonlyArray<{ readonly id: string; readonly name: string; readonly imageUrl?: string }>
-  readonly labels: ReadonlyArray<string>
-  readonly statuses: ReadonlyArray<{ readonly id: string; readonly name: string; readonly imageUrl?: string }>
-  readonly components: ReadonlyArray<{ readonly id: string; readonly name: string; readonly imageUrl?: string }>
-  readonly issueTypes: ReadonlyArray<{ readonly id: string; readonly name: string; readonly imageUrl?: string }>
-  readonly fields: ReadonlyArray<{ readonly id: string; readonly name: string; readonly imageUrl?: string }>
+  readonly metadata: {
+    readonly projects: ReadonlyArray<{
+      readonly id: string
+      readonly key: string
+      readonly name: string
+      readonly imageUrl?: string
+    }>
+    readonly users: ReadonlyArray<{ readonly id: string; readonly name: string; readonly imageUrl?: string }>
+    readonly labels: ReadonlyArray<string>
+    readonly statuses: ReadonlyArray<{ readonly id: string; readonly name: string; readonly imageUrl?: string }>
+    readonly components: ReadonlyArray<{ readonly id: string; readonly name: string; readonly imageUrl?: string }>
+    readonly issueTypes: ReadonlyArray<{ readonly id: string; readonly name: string; readonly imageUrl?: string }>
+    readonly fields: ReadonlyArray<{ readonly id: string; readonly name: string; readonly imageUrl?: string }>
+  }
+  readonly syncedAt?: number | "Infinity" | "-Infinity" | "NaN"
+  readonly stale: boolean
+  readonly syncing: boolean
+  readonly refreshingProjectKeys: ReadonlyArray<string>
+  readonly missingProjectKeys: ReadonlyArray<string>
+  readonly lastAttemptAt?: number | "Infinity" | "-Infinity" | "NaN"
+  readonly syncError?: string
+}
+
+export type IssueWatchersSyncMetadataInput = {
+  readonly integrationID: { readonly integrationID: string; readonly connectionID: string }["integrationID"]
+  readonly connectionID: { readonly integrationID: string; readonly connectionID: string }["connectionID"]
+}
+
+export type IssueWatchersSyncMetadataOutput = {
+  readonly syncing: boolean
+  readonly refreshingProjectKeys: ReadonlyArray<string>
+  readonly lastAttemptAt?: number | "Infinity" | "-Infinity" | "NaN"
+  readonly syncError?: string
 }
 
 export type IssueWatchersPreviewInput = {

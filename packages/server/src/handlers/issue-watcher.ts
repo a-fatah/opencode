@@ -68,6 +68,11 @@ const sourceError = (error: IssueWatcher.SourceNotFoundError | IssueWatcher.Conn
   })
 }
 
+const metadataError = (error: IssueWatcher.SourceNotFoundError | IssueWatcher.ConnectionNotFoundError) =>
+  error._tag === "IssueWatcher.SourceNotFoundError"
+    ? new IssueIntegrationNotFoundError({ integrationID: error.integrationID, message: "Issue source not found" })
+    : new IssueIntegrationConnectionNotFoundError({ connectionID: error.connectionID, message: "Issue source connection not found" })
+
 export const IssueWatcherHandler = HttpApiBuilder.group(Api, "server.issueWatcher", (handlers) =>
   Effect.gen(function* () {
     const service = yield* IssueWatcher.Service
@@ -91,8 +96,11 @@ export const IssueWatcherHandler = HttpApiBuilder.group(Api, "server.issueWatche
       )
       .handle("issueWatcher.metadata", (ctx) =>
         service.source.metadata(ctx.params.integrationID, ctx.params.connectionID, ctx.payload).pipe(
-          Effect.mapError(sourceError),
+          Effect.mapError(metadataError),
         ),
+      )
+      .handle("issueWatcher.syncMetadata", (ctx) =>
+        service.source.syncMetadata(ctx.params.integrationID, ctx.params.connectionID).pipe(Effect.mapError(metadataError)),
       )
       .handle("issueWatcher.preview", (ctx) => service.preview(ctx.payload).pipe(Effect.mapError(sourceError)))
       .handle("issueWatcher.getSettings", () => service.settings.get())

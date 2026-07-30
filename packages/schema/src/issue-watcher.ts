@@ -420,6 +420,63 @@ export const Metadata = Schema.Struct({
   fields: Schema.Array(MetadataOption),
 }).annotate({ identifier: "IssueWatcher.Metadata" })
 
+export interface MetadataGlobal extends Schema.Schema.Type<typeof MetadataGlobal> {}
+export const MetadataGlobal = Schema.Struct({
+  projects: Schema.Array(MetadataProject),
+  labels: Schema.Array(Schema.String),
+  fields: Schema.Array(MetadataOption),
+}).annotate({ identifier: "IssueWatcher.MetadataGlobal" })
+
+export interface MetadataProjectScope extends Schema.Schema.Type<typeof MetadataProjectScope> {}
+export const MetadataProjectScope = Schema.Struct({
+  users: Schema.Array(MetadataOption),
+  statuses: Schema.Array(MetadataOption),
+  components: Schema.Array(MetadataOption),
+  issueTypes: Schema.Array(MetadataOption),
+}).annotate({ identifier: "IssueWatcher.MetadataProjectScope" })
+
+export interface MetadataGlobalSnapshot extends Schema.Schema.Type<typeof MetadataGlobalSnapshot> {}
+export const MetadataGlobalSnapshot = Schema.Struct({
+  ...MetadataGlobal.fields,
+  syncedAt: Schema.Number,
+}).annotate({ identifier: "IssueWatcher.MetadataGlobalSnapshot" })
+
+export interface MetadataProjectSnapshot extends Schema.Schema.Type<typeof MetadataProjectSnapshot> {}
+export const MetadataProjectSnapshot = Schema.Struct({
+  ...MetadataProjectScope.fields,
+  syncedAt: Schema.Number,
+}).annotate({ identifier: "IssueWatcher.MetadataProjectSnapshot" })
+
+export interface MetadataSnapshot extends Schema.Schema.Type<typeof MetadataSnapshot> {}
+export const MetadataSnapshot = Schema.Struct({
+  connectionID: ConnectionID,
+  global: optional(MetadataGlobalSnapshot),
+  projects: Schema.Record(Schema.String, MetadataProjectSnapshot),
+  lastAttemptAt: optional(Schema.Number),
+  lastError: optional(Schema.String),
+  updatedAt: Schema.Number,
+}).annotate({ identifier: "IssueWatcher.MetadataSnapshot" })
+
+export interface MetadataResult extends Schema.Schema.Type<typeof MetadataResult> {}
+export const MetadataResult = Schema.Struct({
+  metadata: Metadata,
+  syncedAt: optional(Schema.Number),
+  stale: Schema.Boolean,
+  syncing: Schema.Boolean,
+  refreshingProjectKeys: Schema.Array(Schema.String),
+  missingProjectKeys: Schema.Array(Schema.String),
+  lastAttemptAt: optional(Schema.Number),
+  syncError: optional(Schema.String),
+}).annotate({ identifier: "IssueWatcher.MetadataResult" })
+
+export interface MetadataSyncStatus extends Schema.Schema.Type<typeof MetadataSyncStatus> {}
+export const MetadataSyncStatus = Schema.Struct({
+  syncing: Schema.Boolean,
+  refreshingProjectKeys: Schema.Array(Schema.String),
+  lastAttemptAt: optional(Schema.Number),
+  syncError: optional(Schema.String),
+}).annotate({ identifier: "IssueWatcher.MetadataSyncStatus" })
+
 export interface VerificationInput extends Schema.Schema.Type<typeof VerificationInput> {}
 export const VerificationInput = Schema.Struct({
   key: optional(Schema.String),

@@ -425,6 +425,7 @@ export interface MetadataGlobal extends Schema.Schema.Type<typeof MetadataGlobal
 export const MetadataGlobal = Schema.Struct({
   projects: Schema.Array(MetadataProject),
   labels: Schema.Array(Schema.String),
+  statuses: optional(Schema.Array(MetadataOption)),
   fields: Schema.Array(MetadataOption),
 }).annotate({ identifier: "IssueWatcher.MetadataGlobal" })
 

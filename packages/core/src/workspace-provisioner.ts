@@ -2,7 +2,6 @@ export * as WorkspaceProvisioner from "./workspace-provisioner"
 
 import path from "path"
 import { WorkspaceProvisioner } from "@opencode-ai/schema/workspace-provisioner"
-import { WorkspaceID } from "@opencode-ai/schema/workspace-id"
 import { and, eq, ne, or } from "drizzle-orm"
 import { Context, Effect, Layer, Schema } from "effect"
 import { ChildProcess } from "effect/unstable/process"
@@ -186,10 +185,7 @@ const layer = Layer.effect(
         ...(input.project.sourceCommonDirectory
           ? { sourceCommonDirectory: input.project.sourceCommonDirectory }
           : {}),
-        location: {
-          directory,
-          ...(input.strategy.type === "worktree" ? { workspaceID: WorkspaceID.make(`wrk_${digest}`) } : {}),
-        },
+        location: { directory },
         ownership: input.strategy.type === "current" ? "borrowed" : input.strategy.type,
         ...(input.project.baseRevision ? { baseRevision: input.project.baseRevision } : {}),
         ...(input.project.sourceBranch ? { sourceBranch: input.project.sourceBranch } : {}),

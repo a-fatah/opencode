@@ -27,6 +27,7 @@ import sessionMetadataMigration from "@opencode-ai/core/database/migration/20260
 import workspaceProvisionerMigration from "@opencode-ai/core/database/migration/20260729205734_workspace_provisioner"
 import workspaceProvisionerSafetyMigration from "@opencode-ai/core/database/migration/20260729211734_workspace_provisioner_safety"
 import workspaceProvisionerRecoveryMigration from "@opencode-ai/core/database/migration/20260730090000_workspace_provisioner_recovery"
+import implicitLocalProvisionedWorktreesMigration from "@opencode-ai/core/database/migration/20260730110000_implicit_local_provisioned_worktrees"
 import issueMetadataSnapshotMigration from "@opencode-ai/core/database/migration/20260730094236_issue_metadata_snapshot"
 import issueMetadataCoordinationMigration from "@opencode-ai/core/database/migration/20260730100139_issue_metadata_coordination"
 import type { SqlClient as SqlClientService } from "effect/unstable/sql/SqlClient"
@@ -87,6 +88,57 @@ describe("DatabaseMigration", () => {
           { id: "pending", setup_completed: "pending" },
           { id: "running", setup_completed: "ambiguous" },
         ])
+      }),
+    )
+  })
+  test("repairs synthetic workspace IDs on provisioned worktree sessions", async () => {
+    await run(
+      Effect.gen(function* () {
+        const db = yield* makeDb
+        yield* db.run(sql`CREATE TABLE session (id text PRIMARY KEY, directory text NOT NULL, workspace_id text)`)
+        yield* db.run(sql`CREATE TABLE workspace_provisioner_lease (id text PRIMARY KEY, lease text NOT NULL)`)
+        yield* db.run(sql`CREATE TABLE issue_materialization (id text PRIMARY KEY, workspace_lease text, resolved_location text)`)
+        yield* db.run(sql`
+          INSERT INTO workspace_provisioner_lease (id, lease)
+          VALUES ('lease', '{"strategy":{"type":"worktree"},"location":{"directory":"/worktree","workspaceID":"wrk_synthetic"}}')
+        `)
+        yield* db.run(sql`
+          INSERT INTO session (id, directory, workspace_id)
+          VALUES ('session', '/worktree', 'wrk_synthetic')
+        `)
+        yield* db.run(sql`
+          INSERT INTO issue_materialization (id, workspace_lease, resolved_location)
+          VALUES (
+            'materialization',
+            '{"strategy":{"type":"worktree"},"location":{"directory":"/worktree","workspaceID":"wrk_synthetic"}}',
+            '{"directory":"/worktree","workspaceID":"wrk_synthetic"}'
+          )
+        `)
+
+        yield* DatabaseMigration.applyOnly(db, [implicitLocalProvisionedWorktreesMigration])
+
+        expect(yield* db.get(sql`SELECT directory, workspace_id FROM session WHERE id = 'session'`)).toEqual({
+          directory: "/worktree",
+          workspace_id: null,
+        })
+        expect(
+          yield* db.get(sql`
+            SELECT
+              json_extract(lease, '$.location.workspaceID') AS lease_workspace,
+              json_extract(lease, '$.location.directory') AS lease_directory
+            FROM workspace_provisioner_lease
+            WHERE id = 'lease'
+          `),
+        ).toEqual({ lease_workspace: null, lease_directory: "/worktree" })
+        expect(
+          yield* db.get(sql`
+            SELECT
+              json_extract(workspace_lease, '$.location.workspaceID') AS lease_workspace,
+              json_extract(resolved_location, '$.workspaceID') AS resolved_workspace
+            FROM issue_materialization
+            WHERE id = 'materialization'
+          `),
+        ).toEqual({ lease_workspace: null, resolved_workspace: null })
       }),
     )
   })

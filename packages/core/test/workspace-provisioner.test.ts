@@ -98,6 +98,7 @@ describe("WorkspaceProvisioner", () => {
       const relative = path.relative(path.dirname(fixture.directory), lease.location.directory).split(path.sep)
       expect(relative).toEqual([".opencode-worktrees", expect.stringMatching(/^[a-f0-9]{20}$/), expect.stringMatching(/^[a-f0-9]{20}$/)])
       expect(lease.location.directory).not.toContain("escaped-project")
+      expect(lease.location.workspaceID).toBeUndefined()
     }),
   )
 

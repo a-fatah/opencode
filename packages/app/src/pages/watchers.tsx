@@ -12,8 +12,10 @@ import { DialogConnectSource } from "@/components/settings-v2/dialog-connect-sou
 import { IssueSourceIcon } from "@/components/issue-source-icon"
 import type { IntegrationSource } from "@/components/settings-v2/integrations-logic"
 import { useServerSDK } from "@/context/server-sdk"
+import { useLanguage } from "@/context/language"
 import { useTabs } from "@/context/tabs"
 import { requireServerKey } from "@/utils/session-route"
+import { getRelativeTime } from "@/utils/time"
 import type { IssueWatchersMetadataOutput, IssueWatchersPreviewInput, IssueWatchersPreviewOutput } from "@opencode-ai/client-next"
 import {
   authExpiredMessage,
@@ -72,6 +74,7 @@ const escapeLanguages = ["jql", "linear-filter", "github-search"] as const
 
 export default function WatchersPage() {
   const serverSdk = useServerSDK()
+  const language = useLanguage()
   const dialog = useDialog()
   const navigate = useNavigate()
   const params = useParams<{ serverKey: string }>()
@@ -206,7 +209,7 @@ export default function WatchersPage() {
                           </A>
                            <div class="flex w-full flex-wrap items-center gap-3 md:w-auto md:shrink-0 md:justify-end">
                             <span class="text-12-regular text-v2-text-text-muted">
-                              {watcher.lastRun ? `Last run ${new Date(watcher.lastRun.startedAt).toLocaleString()}` : "Never run"}
+                              {watcher.lastRun ? `Last run ${getRelativeTime(watcher.lastRun.startedAt, language.t)}` : "Never run"}
                             </span>
                             <ButtonV2 variant="ghost" disabled={!!store.running || !info().enabled} onClick={() => void run(info().id)}>{store.running === info().id ? "Running..." : "Run now"}</ButtonV2>
                             <button
@@ -674,7 +677,8 @@ function WatcherCounters(props: { summary: InboxSummary }) {
 }
 
 function WatcherHistory(props: { entries: ReadonlyArray<WatcherHistoryEntry>; error: string; nextCursor?: string; loading: boolean; onRetry: () => void; onLoadMore: () => void }) {
-  return <section class="mt-5 rounded-xl border border-v2-border-border-base bg-v2-background-bg-base p-5"><div><p class="text-12-medium uppercase tracking-[0.12em] text-v2-text-text-muted">Activity</p><h2 class="mt-1 text-18-medium text-v2-text-text-strong">Run and observation history</h2></div><Show when={props.error}><div class="mt-4 flex flex-wrap items-center gap-3"><p class="min-w-0 flex-1 text-12-regular text-v2-text-text-danger">{props.error}</p><ButtonV2 variant="outline" onClick={props.onRetry}>Retry</ButtonV2></div></Show><Show when={props.entries.length} fallback={<Status>No runs or observations yet.</Status>}><div class="mt-4 flex flex-col"><For each={props.entries}>{(entry, index) => <div classList={{ "border-t border-v2-border-border-base": index() > 0 }} class="flex gap-3 py-3"><span class="mt-0.5 rounded-full bg-v2-background-bg-surface px-2 py-1 text-10-medium uppercase text-v2-text-text-muted">{entry.type}</span><Show when={entry.type === "run"} fallback={<div class="min-w-0"><p class="truncate text-13-medium text-v2-text-text-strong">{entry.type === "observation" ? `${entry.observation.payload.key} observed` : "Observation"}</p><p class="mt-1 truncate text-12-regular text-v2-text-text-muted">{entry.type === "observation" ? entry.observation.payload.title : ""}</p></div>}>{entry.type === "run" && <div><p class="text-13-medium text-v2-text-text-strong">{outcomeLabel(entry.run.outcome)}</p><p class="mt-1 text-12-regular text-v2-text-text-muted">{entry.run.scanned} scanned · {entry.run.matched} matched · {new Date(entry.run.startedAt).toLocaleString()}</p><Show when={entry.run.error}><p class="mt-1 text-12-regular text-v2-text-text-danger">{entry.run.error}</p></Show></div>}</Show></div>}</For></div></Show><Show when={props.nextCursor}><div class="mt-4 flex justify-center"><ButtonV2 variant="outline" disabled={props.loading} onClick={props.onLoadMore}>{props.loading ? "Loading..." : "Load more"}</ButtonV2></div></Show></section>
+  const language = useLanguage()
+  return <section class="mt-5 rounded-xl border border-v2-border-border-base bg-v2-background-bg-base p-5"><div><p class="text-12-medium uppercase tracking-[0.12em] text-v2-text-text-muted">Activity</p><h2 class="mt-1 text-18-medium text-v2-text-text-strong">Run and observation history</h2></div><Show when={props.error}><div class="mt-4 flex flex-wrap items-center gap-3"><p class="min-w-0 flex-1 text-12-regular text-v2-text-text-danger">{props.error}</p><ButtonV2 variant="outline" onClick={props.onRetry}>Retry</ButtonV2></div></Show><Show when={props.entries.length} fallback={<Status>No runs or observations yet.</Status>}><div class="mt-4 flex flex-col"><For each={props.entries}>{(entry, index) => <div classList={{ "border-t border-v2-border-border-base": index() > 0 }} class="flex gap-3 py-3"><span class="mt-0.5 rounded-full bg-v2-background-bg-surface px-2 py-1 text-10-medium uppercase text-v2-text-text-muted">{entry.type}</span><Show when={entry.type === "run"} fallback={<div class="min-w-0"><p class="truncate text-13-medium text-v2-text-text-strong">{entry.type === "observation" ? `${entry.observation.payload.key} observed` : "Observation"}</p><p class="mt-1 truncate text-12-regular text-v2-text-text-muted">{entry.type === "observation" ? `${entry.observation.payload.title} · ${getRelativeTime(entry.observation.timeCreated, language.t)}` : ""}</p></div>}>{entry.type === "run" && <div><p class="text-13-medium text-v2-text-text-strong">{outcomeLabel(entry.run.outcome)}</p><p class="mt-1 text-12-regular text-v2-text-text-muted">{entry.run.scanned} scanned · {entry.run.matched} matched · {getRelativeTime(entry.run.startedAt, language.t)}</p><Show when={entry.run.error}><p class="mt-1 text-12-regular text-v2-text-text-danger">{entry.run.error}</p></Show></div>}</Show></div>}</For></div></Show><Show when={props.nextCursor}><div class="mt-4 flex justify-center"><ButtonV2 variant="outline" disabled={props.loading} onClick={props.onLoadMore}>{props.loading ? "Loading..." : "Load more"}</ButtonV2></div></Show></section>
 }
 
 function Step(props: { number: string; title: string; children: string }) { return <div class="rounded-xl bg-v2-background-bg-surface p-4"><span class="text-11-medium text-v2-text-text-muted">0{props.number}</span><h3 class="mt-2 text-14-medium text-v2-text-text-strong">{props.title}</h3><p class="mt-1 text-12-regular text-v2-text-text-muted">{props.children}</p></div> }
@@ -756,11 +760,12 @@ function MetadataPicker(props: {
 }
 
 function MetadataSyncStatus(props: { result?: MetadataResult; loading: boolean; error?: string; polling: boolean; resyncing: boolean; onResync: () => void }) {
+  const language = useLanguage()
   const state = () => metadataSyncState({ result: props.result, error: props.error, resyncing: props.resyncing })
   const refreshing = () => state().refreshing
   const warning = () => state().warning
   const syncedAt = () => typeof props.result?.syncedAt === "number" ? props.result.syncedAt : undefined
-  return <div class="flex flex-wrap items-center gap-2 rounded-lg border border-v2-border-border-base bg-v2-background-bg-surface px-3 py-2"><p classList={{ "text-v2-text-text-danger": !!warning(), "text-v2-text-text-muted": !warning() }} class="min-w-0 flex-1 text-11-regular"><Show when={warning()} fallback={refreshing() ? "Refreshing Jira data on the server..." : props.polling ? "Checking for updated Jira data..." : syncedAt() ? `Synced ${relativeTime(syncedAt()!)}` : props.loading ? "Loading Jira data..." : "Jira data has not synced yet."}>Using Jira data{syncedAt() ? ` from ${relativeTime(syncedAt()!)}` : ""}. {warning()}</Show></p><ButtonV2 size="small" variant="ghost" disabled={refreshing()} onClick={props.onResync}>{refreshing() ? "Refreshing..." : "Resync"}</ButtonV2></div>
+  return <div class="flex flex-wrap items-center gap-2 rounded-lg border border-v2-border-border-base bg-v2-background-bg-surface px-3 py-2"><p classList={{ "text-v2-text-text-danger": !!warning(), "text-v2-text-text-muted": !warning() }} class="min-w-0 flex-1 text-11-regular"><Show when={warning()} fallback={refreshing() ? "Refreshing Jira data on the server..." : props.polling ? "Checking for updated Jira data..." : syncedAt() ? `Synced ${getRelativeTime(syncedAt()!, language.t)}` : props.loading ? "Loading Jira data..." : "Jira data has not synced yet."}>Using Jira data{syncedAt() ? ` from ${getRelativeTime(syncedAt()!, language.t)}` : ""}. {warning()}</Show></p><ButtonV2 size="small" variant="ghost" disabled={refreshing()} onClick={props.onResync}>{refreshing() ? "Refreshing..." : "Resync"}</ButtonV2></div>
 }
 
 function metadataProjectLoading(result: MetadataResult | undefined, projects: ReadonlyArray<string>) {
@@ -772,8 +777,6 @@ function metadataProjectLoading(result: MetadataResult | undefined, projects: Re
 function metadataGlobalLoading(result: MetadataResult | undefined, loading: boolean) {
   return loading || (!!result?.syncing && typeof result.syncedAt !== "number")
 }
-
-function relativeTime(value: number) { const minutes = Math.max(0, Math.floor((Date.now() - value) / 60_000)); if (minutes < 1) return "just now"; if (minutes < 60) return `${minutes}m ago`; const hours = Math.floor(minutes / 60); if (hours < 24) return `${hours}h ago`; return `${Math.floor(hours / 24)}d ago` }
 
 function mappingOptions(type: WatcherDraft["routing"]["mappings"][number]["key"]["type"], metadata?: Metadata) {
   if (type === "issueProject") return (metadata?.projects ?? []).map((project) => ({ id: project.key, name: project.name, imageUrl: project.imageUrl, detail: project.key }))

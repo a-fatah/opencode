@@ -5,6 +5,7 @@ import { createEffect, createMemo, createResource, For, onCleanup, onMount, Show
 import { createStore } from "solid-js/store"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { DialogConnectSource } from "@/components/settings-v2/dialog-connect-source"
+import { IssueSourceIcon } from "@/components/issue-source-icon"
 import { useServerSDK } from "@/context/server-sdk"
 import { requireServerKey, sessionHref } from "@/utils/session-route"
 import { issueWatcherApi, watcherConnectionSource, type InboxItem, type InboxSummary } from "./watchers/api"
@@ -242,7 +243,7 @@ function InboxRow(props: {
     <article classList={{ "border-t border-v2-border-border-base": props.divided }} class="flex flex-col gap-4 p-4 md:flex-row md:items-center">
       <div class="flex min-w-0 flex-1 gap-3">
         <input type="checkbox" disabled={!actionable() || props.busy} checked={props.selected} onChange={(event) => props.onSelect(event.currentTarget.checked)} aria-label={`Select ${props.item.match.externalKey}`} class="mt-2 size-4 shrink-0" />
-        <span class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-v2-background-bg-surface text-12-medium uppercase text-v2-text-text-muted">{props.item.sourceGlyph || props.item.sourceName.slice(0, 1)}</span>
+        <IssueSourceIcon integrationID={props.item.match.integrationID} sourceName={props.item.sourceName} />
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2"><a href={props.item.match.externalUrl} target="_blank" rel="noreferrer" class="text-13-medium text-v2-text-text-strong hover:underline">{props.item.match.externalKey}</a><For each={props.item.match.payload.labels.slice(0, 3)}>{(label) => <span class="rounded-full bg-v2-background-bg-surface px-2 py-0.5 text-10-regular text-v2-text-text-muted">{label}</span>}</For></div>
           <p class="mt-1 truncate text-14-regular text-v2-text-text-base">{props.item.match.payload.title}</p>

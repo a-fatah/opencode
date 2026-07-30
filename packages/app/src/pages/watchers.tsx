@@ -9,6 +9,7 @@ import { Popover } from "@kobalte/core/popover"
 import { createEffect, createMemo, createResource, For, onCleanup, onMount, Show, untrack, type JSX } from "solid-js"
 import { createStore, reconcile, type SetStoreFunction } from "solid-js/store"
 import { DialogConnectSource } from "@/components/settings-v2/dialog-connect-source"
+import { IssueSourceIcon } from "@/components/issue-source-icon"
 import type { IntegrationSource } from "@/components/settings-v2/integrations-logic"
 import { useServerSDK } from "@/context/server-sdk"
 import { useTabs } from "@/context/tabs"
@@ -508,7 +509,7 @@ export function WatcherEditorPage() {
             <Show when={store.section === "routing"}><RoutingEditor store={store} setStore={setStore} metadata={store.metadataResult?.metadata} metadataLoading={metadataGlobalLoading(store.metadataResult, store.metadataLoading)} projectLoading={metadataProjectLoading(store.metadataResult, store.draft.criteria.issueProjects)} /></Show>
             <Show when={store.section === "action"}><ActionEditor store={store} setStore={setStore} concurrentRuns={loaded()?.settings.concurrentRuns ?? 1} metadata={store.metadataResult?.metadata} projectLoading={metadataProjectLoading(store.metadataResult, store.draft.criteria.issueProjects)} /></Show>
           </section>
-          <PreviewPane section={store.section} preview={store.preview} busy={store.previewBusy} error={store.previewError} draft={store.draft} />
+          <PreviewPane section={store.section} preview={store.preview} busy={store.previewBusy} error={store.previewError} draft={store.draft} sourceName={selectedSource()?.integration.name ?? store.draft.integrationID} />
         </div>
         <div class="mt-5"><SafetyCopy /></div>
         <Show when={!isNew()}><WatcherHistory entries={store.history} error={store.historyError} nextCursor={store.historyCursor} loading={store.historyLoading} onRetry={refreshHistory} onLoadMore={loadMoreHistory} /></Show>
@@ -601,7 +602,7 @@ function ActionEditor(props: { store: EditorState; setStore: EditorSetter; concu
   )
 }
 
-function PreviewPane(props: { section: "criteria" | "routing" | "action"; preview?: PreviewOutput; busy: boolean; error: string; draft: WatcherDraft }) {
+function PreviewPane(props: { section: "criteria" | "routing" | "action"; preview?: PreviewOutput; busy: boolean; error: string; draft: WatcherDraft; sourceName: string }) {
   const routeText = (route: PreviewMatch["route"]) => "projectID" in route
     ? `${route.projectID} · ${route.reason}`
     : `Inbox · ${route.reason}${route.suggestion ? ` · Suggested: ${route.suggestion}` : ""}`
@@ -620,7 +621,7 @@ function PreviewPane(props: { section: "criteria" | "routing" | "action"; previe
         <Show when={canPreview(props.draft) && hasPreviewCriteria(props.draft) && props.preview && !props.preview.matches.length}><Status>No issues match these criteria right now.</Status></Show>
         <div class="mt-4 flex flex-col gap-3">
           <For each={props.preview?.matches}>
-            {(match) => <article class="rounded-lg border border-v2-border-border-base bg-v2-background-bg-surface p-3"><p class="text-13-medium text-v2-text-text-strong">{match.issue.key ?? match.issue.id ?? "Issue"}</p><p class="mt-1 text-12-regular text-v2-text-text-muted">{match.issue.title}</p><Show when={props.section !== "action"}><div class="mt-3 border-t border-v2-border-border-base pt-2 text-11-regular text-v2-text-text-muted"><span class="font-medium">Route rung:</span> {routeText(match.route)}</div></Show><Show when={props.section === "action"}><div class="mt-3 flex flex-col gap-3 border-t border-v2-border-border-base pt-3"><PreviewBlock label="Rendered prompt" value={match.prompt} /><PreviewBlock label="Exact write-back" value={writebackText(match.writeback)} /></div></Show></article>}
+            {(match) => <article class="rounded-lg border border-v2-border-border-base bg-v2-background-bg-surface p-3"><div class="flex gap-2.5"><IssueSourceIcon integrationID={props.draft.integrationID} sourceName={props.sourceName} class="size-7 rounded-md" /><div class="min-w-0"><p class="text-13-medium text-v2-text-text-strong">{match.issue.key ?? match.issue.id ?? "Issue"}</p><p class="mt-1 text-12-regular text-v2-text-text-muted">{match.issue.title}</p></div></div><Show when={props.section !== "action"}><div class="mt-3 border-t border-v2-border-border-base pt-2 text-11-regular text-v2-text-text-muted"><span class="font-medium">Route rung:</span> {routeText(match.route)}</div></Show><Show when={props.section === "action"}><div class="mt-3 flex flex-col gap-3 border-t border-v2-border-border-base pt-3"><PreviewBlock label="Rendered prompt" value={match.prompt} /><PreviewBlock label="Exact write-back" value={writebackText(match.writeback)} /></div></Show></article>}
           </For>
         </div>
         <Show when={props.preview?.truncated}><p class="mt-3 text-11-regular text-v2-text-text-muted">Preview limit reached. Narrow the criteria to inspect fewer issues.</p></Show>

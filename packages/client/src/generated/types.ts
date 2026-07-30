@@ -1749,6 +1749,7 @@ export type IssueWatchersInboxOutput = {
       readonly matchID: string
       readonly mode: "awaiting_run" | "run"
       readonly projectID: string
+      readonly sourceDirectory?: string
       readonly workspace:
         | { readonly type: "branch"; readonly pattern: string }
         | { readonly type: "current" }
@@ -1850,6 +1851,7 @@ export type IssueWatchersApproveInput = {
   readonly mode: {
     readonly mode: "run" | "awaiting_run"
     readonly projectID?: string
+    readonly directory?: string
     readonly workspace?:
       | { readonly type: "branch"; readonly pattern: string }
       | { readonly type: "current" }
@@ -1858,14 +1860,25 @@ export type IssueWatchersApproveInput = {
   readonly projectID?: {
     readonly mode: "run" | "awaiting_run"
     readonly projectID?: string
+    readonly directory?: string
     readonly workspace?:
       | { readonly type: "branch"; readonly pattern: string }
       | { readonly type: "current" }
       | { readonly type: "worktree" }
   }["projectID"]
+  readonly directory?: {
+    readonly mode: "run" | "awaiting_run"
+    readonly projectID?: string
+    readonly directory?: string
+    readonly workspace?:
+      | { readonly type: "branch"; readonly pattern: string }
+      | { readonly type: "current" }
+      | { readonly type: "worktree" }
+  }["directory"]
   readonly workspace?: {
     readonly mode: "run" | "awaiting_run"
     readonly projectID?: string
+    readonly directory?: string
     readonly workspace?:
       | { readonly type: "branch"; readonly pattern: string }
       | { readonly type: "current" }
@@ -1879,8 +1892,21 @@ export type IssueWatchersApproveOutput =
 
 export type IssueWatchersRouteMatchInput = {
   readonly matchID: { readonly matchID: string }["matchID"]
-  readonly projectID: { readonly projectID: string; readonly persistMapping?: boolean }["projectID"]
-  readonly persistMapping?: { readonly projectID: string; readonly persistMapping?: boolean }["persistMapping"]
+  readonly projectID: {
+    readonly projectID: string
+    readonly directory?: string
+    readonly persistMapping?: boolean
+  }["projectID"]
+  readonly directory?: {
+    readonly projectID: string
+    readonly directory?: string
+    readonly persistMapping?: boolean
+  }["directory"]
+  readonly persistMapping?: {
+    readonly projectID: string
+    readonly directory?: string
+    readonly persistMapping?: boolean
+  }["persistMapping"]
 }
 
 export type IssueWatchersRouteMatchOutput = void
@@ -1898,6 +1924,7 @@ export type IssueWatchersRematerializeInput = {
   readonly mode: {
     readonly mode: "run" | "awaiting_run"
     readonly projectID?: string
+    readonly directory?: string
     readonly workspace?:
       | { readonly type: "branch"; readonly pattern: string }
       | { readonly type: "current" }
@@ -1906,14 +1933,25 @@ export type IssueWatchersRematerializeInput = {
   readonly projectID?: {
     readonly mode: "run" | "awaiting_run"
     readonly projectID?: string
+    readonly directory?: string
     readonly workspace?:
       | { readonly type: "branch"; readonly pattern: string }
       | { readonly type: "current" }
       | { readonly type: "worktree" }
   }["projectID"]
+  readonly directory?: {
+    readonly mode: "run" | "awaiting_run"
+    readonly projectID?: string
+    readonly directory?: string
+    readonly workspace?:
+      | { readonly type: "branch"; readonly pattern: string }
+      | { readonly type: "current" }
+      | { readonly type: "worktree" }
+  }["directory"]
   readonly workspace?: {
     readonly mode: "run" | "awaiting_run"
     readonly projectID?: string
+    readonly directory?: string
     readonly workspace?:
       | { readonly type: "branch"; readonly pattern: string }
       | { readonly type: "current" }
@@ -2156,6 +2194,7 @@ export type IssueWatchersProvenanceDetailOutput = {
     readonly matchID: string
     readonly mode: "awaiting_run" | "run"
     readonly projectID: string
+    readonly sourceDirectory?: string
     readonly workspace:
       | { readonly type: "branch"; readonly pattern: string }
       | { readonly type: "current" }
@@ -2270,6 +2309,7 @@ export type IssueWatchersSyncProvenanceOutput = {
     readonly matchID: string
     readonly mode: "awaiting_run" | "run"
     readonly projectID: string
+    readonly sourceDirectory?: string
     readonly workspace:
       | { readonly type: "branch"; readonly pattern: string }
       | { readonly type: "current" }

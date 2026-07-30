@@ -47,6 +47,7 @@ export interface MaterializeInput {
   readonly matchID: IssueMatch.ID
   readonly mode?: IssueMatch.Materialization["mode"]
   readonly projectID?: IssueMatch.Materialization["projectID"]
+  readonly directory?: IssueMatch.Materialization["sourceDirectory"]
   readonly workspace?: IssueWatcher.Workspace
   readonly rematerialize?: boolean
   readonly secondary?: boolean
@@ -89,6 +90,7 @@ export const make = Effect.fn("IssueWatcherMaterialization.make")(function* (inp
     matchID: row.match_id,
     mode: row.mode,
     projectID: Project.ID.make(row.project_id),
+    ...(row.source_directory ? { sourceDirectory: row.source_directory } : {}),
     workspace: row.workspace,
     ...(row.resolved_location ? { resolvedLocation: row.resolved_location } : {}),
     ...(row.workspace_lease ? { workspaceLease: row.workspace_lease } : {}),
@@ -135,7 +137,7 @@ export const make = Effect.fn("IssueWatcherMaterialization.make")(function* (inp
       : undefined
     if (!match || !watcher) return yield* Effect.die(`Issue match not found: ${initial.match_id}`)
 
-    const project = yield* input.projects.resolve(Project.ID.make(initial.project_id))
+    const project = yield* input.projects.resolve(Project.ID.make(initial.project_id), initial.source_directory ?? undefined)
     const projectSnapshot = (yield* input.projects.list()).find((item) => item.projectID === initial.project_id)
     const secondary = !(yield* input.db.select({ id: IssueSessionClaimTable.materialization_id })
       .from(IssueSessionClaimTable).where(eq(IssueSessionClaimTable.materialization_id, initial.id)).get().pipe(Effect.orDie))
@@ -235,6 +237,10 @@ export const make = Effect.fn("IssueWatcherMaterialization.make")(function* (inp
     return yield* continueMaterialization(materializationID).pipe(
       Effect.catchCause((cause) => Effect.gen(function* () {
         const error = Option.getOrUndefined(Cause.findErrorOption(cause))
+        const failed = yield* get(materializationID)
+        if (failed.workspace_lease && !failed.provider_started) {
+          yield* input.workspaces.cleanup(failed.workspace_lease).pipe(Effect.ignore)
+        }
         yield* input.db.update(IssueMaterializationTable).set({ state: "failed", error: failureDetail(error, cause) })
           .where(eq(IssueMaterializationTable.id, materializationID)).run().pipe(Effect.orDie)
         return decode(yield* get(materializationID))
@@ -349,6 +355,7 @@ export const make = Effect.fn("IssueWatcherMaterialization.make")(function* (inp
         match_id: match.id,
         mode: request.mode ?? (watcher.action.mode === "run" ? "run" : "awaiting_run"),
         project_id: request.projectID ?? match.project_id!,
+        source_directory: request.directory ?? terminal?.source_directory,
         workspace: request.workspace ?? watcher.routing.workspace,
         baseline_observation_id: observation.id,
         state: "pending",

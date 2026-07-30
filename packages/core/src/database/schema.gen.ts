@@ -156,6 +156,7 @@ export default {
           \`match_id\` text NOT NULL,
           \`mode\` text NOT NULL,
           \`project_id\` text NOT NULL,
+          \`source_directory\` text,
           \`workspace\` text NOT NULL,
           \`resolved_location\` text,
           \`workspace_lease\` text,

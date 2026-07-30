@@ -6,6 +6,7 @@ import { IssueWatcher } from "@opencode-ai/schema/issue-watcher"
 import { Timestamps } from "../database/schema.sql"
 import { ProjectTable } from "../project/sql"
 import { SessionTable } from "../session/sql"
+import { AbsolutePath } from "../schema"
 
 export const IssueWatcherTable = sqliteTable("issue_watcher", {
   id: text().$type<IssueWatcher.ID>().primaryKey(),
@@ -165,6 +166,7 @@ export const IssueMaterializationTable = sqliteTable(
     match_id: text().$type<IssueMatch.ID>().notNull().references(() => IssueMatchTable.id, { onDelete: "cascade" }),
     mode: text().$type<IssueMatch.Materialization["mode"]>().notNull(),
     project_id: text().notNull(),
+    source_directory: text().$type<AbsolutePath>(),
     workspace: text({ mode: "json" }).$type<IssueWatcher.Workspace>().notNull(),
     resolved_location: text({ mode: "json" }).$type<NonNullable<IssueMatch.Materialization["resolvedLocation"]>>(),
     workspace_lease: text({ mode: "json" }).$type<NonNullable<IssueMatch.Materialization["workspaceLease"]>>(),

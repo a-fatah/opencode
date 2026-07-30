@@ -246,24 +246,31 @@ type Endpoint1_21Input = {
   readonly matchID: Endpoint1_21Request["params"]["matchID"]
   readonly mode: Endpoint1_21Request["payload"]["mode"]
   readonly projectID?: Endpoint1_21Request["payload"]["projectID"]
+  readonly directory?: Endpoint1_21Request["payload"]["directory"]
   readonly workspace?: Endpoint1_21Request["payload"]["workspace"]
 }
 const Endpoint1_21 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_21Input) =>
   raw["issueWatcher.approve"]({
     params: { matchID: input["matchID"] },
-    payload: { mode: input["mode"], projectID: input["projectID"], workspace: input["workspace"] },
+    payload: {
+      mode: input["mode"],
+      projectID: input["projectID"],
+      directory: input["directory"],
+      workspace: input["workspace"],
+    },
   }).pipe(Effect.mapError(mapClientError))
 
 type Endpoint1_22Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.routeMatch"]>[0]
 type Endpoint1_22Input = {
   readonly matchID: Endpoint1_22Request["params"]["matchID"]
   readonly projectID: Endpoint1_22Request["payload"]["projectID"]
+  readonly directory?: Endpoint1_22Request["payload"]["directory"]
   readonly persistMapping?: Endpoint1_22Request["payload"]["persistMapping"]
 }
 const Endpoint1_22 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_22Input) =>
   raw["issueWatcher.routeMatch"]({
     params: { matchID: input["matchID"] },
-    payload: { projectID: input["projectID"], persistMapping: input["persistMapping"] },
+    payload: { projectID: input["projectID"], directory: input["directory"], persistMapping: input["persistMapping"] },
   }).pipe(Effect.mapError(mapClientError))
 
 type Endpoint1_23Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.skip"]>[0]
@@ -281,12 +288,18 @@ type Endpoint1_25Input = {
   readonly matchID: Endpoint1_25Request["params"]["matchID"]
   readonly mode: Endpoint1_25Request["payload"]["mode"]
   readonly projectID?: Endpoint1_25Request["payload"]["projectID"]
+  readonly directory?: Endpoint1_25Request["payload"]["directory"]
   readonly workspace?: Endpoint1_25Request["payload"]["workspace"]
 }
 const Endpoint1_25 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_25Input) =>
   raw["issueWatcher.rematerialize"]({
     params: { matchID: input["matchID"] },
-    payload: { mode: input["mode"], projectID: input["projectID"], workspace: input["workspace"] },
+    payload: {
+      mode: input["mode"],
+      projectID: input["projectID"],
+      directory: input["directory"],
+      workspace: input["workspace"],
+    },
   }).pipe(Effect.mapError(mapClientError))
 
 type Endpoint1_26Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.duplicateDetail"]>[0]

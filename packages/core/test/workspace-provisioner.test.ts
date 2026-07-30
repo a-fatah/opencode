@@ -138,7 +138,7 @@ describe("WorkspaceProvisioner", () => {
       const error = yield* service.provision(first).pipe(Effect.flip)
       expect(error).toMatchObject({
         _tag: "WorkspaceProvisioner.NotReadyError",
-        detail: "Current checkout has uncommitted changes",
+        detail: `Current checkout has uncommitted changes: ${fixture.directory}`,
       })
       yield* Effect.promise(() => fs.rm(path.join(fixture.directory, "dirty.txt")))
 

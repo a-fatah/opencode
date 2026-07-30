@@ -18,7 +18,7 @@ import { and, eq } from "drizzle-orm"
 import { EventV2 } from "@opencode-ai/core/event"
 import { IssueMatch } from "@opencode-ai/schema/issue-match"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
-import { ProjectTable } from "@opencode-ai/core/project/sql"
+import { ProjectDirectoryTable, ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { tmpdir } from "./fixture/tmpdir"
 import {
@@ -1096,11 +1096,19 @@ describe("IssueWatcher", () => {
         Effect.promise(() => tmpdir()),
         (directory) => Effect.promise(() => directory[Symbol.asyncDispose]()),
       )
+      const rerouteRoot = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (directory) => Effect.promise(() => directory[Symbol.asyncDispose]()),
+      )
       const retryProjectID = Project.ID.make("materialization-retry-project")
       yield* db.insert(ProjectTable).values({
         id: retryProjectID,
         worktree: AbsolutePath.make(retryRoot.path),
         sandboxes: [],
+      }).run().pipe(Effect.orDie)
+      yield* db.insert(ProjectDirectoryTable).values({
+        project_id: retryProjectID,
+        directory: AbsolutePath.make(rerouteRoot.path),
       }).run().pipe(Effect.orDie)
       const retryLease = WorkspaceProvisioner.Lease.make({
         id: WorkspaceProvisioner.LeaseID.make("wpl_materialization-retry"),
@@ -1161,7 +1169,10 @@ describe("IssueWatcher", () => {
         materialization_id: retryMaterializationID,
       }).run().pipe(Effect.orDie)
 
-      const retried = yield* service.rematerialize(retryMatchID, { mode: "awaiting_run" })
+      const retried = yield* service.rematerialize(retryMatchID, {
+        mode: "awaiting_run",
+        directory: AbsolutePath.make(rerouteRoot.path),
+      })
       expect(retried.status).toBe("created")
       expect(yield* db.select().from(IssueMatchTable).where(eq(IssueMatchTable.id, retryMatchID)).get().pipe(Effect.orDie))
         .toMatchObject({ state: "pending" })
@@ -1169,6 +1180,16 @@ describe("IssueWatcher", () => {
         eq(IssueSessionClaimTable.connection_id, watchers[0]!.connectionID),
         eq(IssueSessionClaimTable.external_id, retryIssue.id),
       )).get().pipe(Effect.orDie)).toMatchObject({ materialization_id: retried.status === "created" ? retried.materializationID : undefined })
+      expect(yield* db.select().from(IssueMaterializationTable).where(eq(
+        IssueMaterializationTable.id,
+        retried.status === "created" ? retried.materializationID : retryMaterializationID,
+      )).get().pipe(Effect.orDie)).toMatchObject({ source_directory: rerouteRoot.path })
+      expect(yield* db.select().from(SessionTable).where(eq(
+        SessionTable.id,
+        retried.status === "created" ? retried.sessionID : SessionID.make("missing"),
+      )).get().pipe(Effect.orDie)).toMatchObject({ directory: rerouteRoot.path })
+      expect(yield* db.select().from(WorkspaceProvisionerTable)
+        .where(eq(WorkspaceProvisionerTable.id, retryLease.id)).get().pipe(Effect.orDie)).toMatchObject({ state: "cleaned" })
 
       const missingAttemptID = SessionExecutionAttempt.ID.make("sea_materialization-missing")
       yield* db.update(SessionInputTable).set({ claimed_attempt_id: missingAttemptID })

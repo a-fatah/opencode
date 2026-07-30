@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "650c548f-fcba-4ac6-85c3-149c40dfa744",
+  "id": "d1503447-8cef-4db5-94d0-dd017eeee866",
   "prevIds": [
-    "990f9658-8bb1-4e7c-82c6-b4ba55f6246a"
+    "650c548f-fcba-4ac6-85c3-149c40dfa744"
   ],
   "ddl": [
     {
@@ -1075,6 +1075,16 @@
       "default": null,
       "generated": null,
       "name": "project_id",
+      "entityType": "columns",
+      "table": "issue_materialization"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "source_directory",
       "entityType": "columns",
       "table": "issue_materialization"
     },

@@ -164,13 +164,15 @@ const layer = Layer.effect(
             )
           : input.project.directory
       const project = yield* db
-        .select({ commands: ProjectTable.commands, worktree: ProjectTable.worktree, vcs: ProjectTable.vcs })
+        .select({ commands: ProjectTable.commands, worktree: ProjectTable.worktree, sandboxes: ProjectTable.sandboxes, vcs: ProjectTable.vcs })
         .from(ProjectTable)
         .where(eq(ProjectTable.id, input.project.id))
         .get()
         .pipe(Effect.orDie)
       if (!project) return yield* new InvalidRequestError({ detail: "Project is not registered" })
-      if (project.worktree !== input.project.directory)
+      const registered = project.worktree === input.project.directory || project.sandboxes.includes(input.project.directory) ||
+        (yield* directories.contains({ projectID: input.project.id, directory: input.project.directory }))
+      if (!registered)
         return yield* new InvalidRequestError({ detail: "Selected source directory does not match the registered project" })
       if (input.project.vcs !== (project.vcs ?? undefined))
         return yield* new InvalidRequestError({ detail: "Selected source repository does not match the registered project" })
@@ -318,7 +320,7 @@ const layer = Layer.effect(
         if (source && (yield* git.history.branch(source)) !== lease.sourceBranch)
           return yield* new OwnershipError({ detail: "Current Git checkout branch changed from the reservation" })
         if (source && !(yield* git.change.clean(source)))
-          return yield* new NotReadyError({ detail: "Current checkout has uncommitted changes" })
+          return yield* new NotReadyError({ detail: `Current checkout has uncommitted changes: ${source.worktree}` })
       }
       const target = lease.strategy.type === "worktree" ? yield* git.repo.discover(lease.location.directory) : undefined
       if (target && target.worktree !== lease.location.directory)
@@ -341,7 +343,7 @@ const layer = Layer.effect(
             return yield* new OwnershipError({ detail: "Interrupted branch contains uncommitted changes" })
         } else {
           if (!(yield* git.change.clean(source)))
-            return yield* new NotReadyError({ detail: "Current checkout has uncommitted changes" })
+            return yield* new NotReadyError({ detail: `Current checkout has uncommitted changes: ${source.worktree}` })
         }
       }
       if (lease.strategy.type === "worktree") {

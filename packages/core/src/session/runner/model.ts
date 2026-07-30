@@ -4,7 +4,9 @@ import { makeLocationNode } from "../../effect/app-node"
 import { type Model } from "@opencode-ai/llm"
 import * as AnthropicMessages from "@opencode-ai/llm/protocols/anthropic-messages"
 import * as OpenAICompatibleChat from "@opencode-ai/llm/protocols/openai-compatible-chat"
+import * as OpenAIChat from "@opencode-ai/llm/protocols/openai-chat"
 import * as OpenAIResponses from "@opencode-ai/llm/protocols/openai-responses"
+import { shouldUseResponsesApi } from "@opencode-ai/llm/providers/github-copilot"
 import { Auth, type AnyRoute } from "@opencode-ai/llm/route"
 import { Context, Effect, Layer, Schema } from "effect"
 import { produce } from "immer"
@@ -153,6 +155,22 @@ export const fromCatalogModel = (
         .model({ id: resolved.api.id }),
     )
   }
+  if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/github-copilot" && resolved.api.url) {
+    const route = shouldUseResponsesApi(resolved.api.id) ? OpenAIResponses.route : OpenAIChat.route
+    return Effect.succeed(
+      withDefaults(resolved, route)
+        .with({
+          auth: key === undefined ? Auth.none : Auth.bearer(key),
+          headers: {
+            "User-Agent": "opencode",
+            "X-GitHub-Api-Version": "2025-04-01",
+            "Openai-Intent": "conversation-edits",
+            "x-initiator": "user",
+          },
+        })
+        .model({ id: resolved.api.id }),
+    )
+  }
   if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/openai-compatible" && resolved.api.url) {
     return Effect.succeed(
       withDefaults(resolved, OpenAICompatibleChat.route)
@@ -176,6 +194,7 @@ export const supported = (model: ModelV2.Info) =>
   model.api.type === "aisdk" &&
   (model.api.package === "@ai-sdk/openai" ||
     model.api.package === "@ai-sdk/anthropic" ||
+    (model.api.package === "@ai-sdk/github-copilot" && model.api.url !== undefined) ||
     (model.api.package === "@ai-sdk/openai-compatible" && model.api.url !== undefined))
 
 /** Resolves models from the catalog belonging to the current Location runtime. */

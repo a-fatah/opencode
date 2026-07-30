@@ -393,21 +393,18 @@ const layer = Layer.effect(
       readonly force: boolean
       readonly claimedMessageID?: SessionMessage.ID
     }) {
+      const claimed = input.claimedMessageID !== undefined
       if (input.claimedMessageID) {
         const promoted = yield* SessionInput.promoteClaimed(db, events, input.sessionID, input.claimedMessageID)
         if (!promoted) return
       }
-      const hasSteer = yield* SessionInput.hasPending(db, input.sessionID, "steer")
-      const hasQueue = hasSteer ? false : yield* SessionInput.hasPending(db, input.sessionID, "queue")
-      if (!input.force && !hasSteer && !hasQueue) return
+      const hasSteer = claimed ? false : yield* SessionInput.hasPending(db, input.sessionID, "steer")
+      const hasQueue = claimed || hasSteer ? false : yield* SessionInput.hasPending(db, input.sessionID, "queue")
+      if (!claimed && !input.force && !hasSteer && !hasQueue) return
       yield* failInterruptedTools(input.sessionID)
-      if (input.claimedMessageID) {
-        yield* runTurn(input.sessionID, undefined, 1)
-        return
-      }
       yield* Effect.gen(function* () {
         let promotion: SessionInput.Delivery | undefined = hasSteer ? "steer" : hasQueue ? "queue" : undefined
-        let shouldRun = input.force || hasSteer || hasQueue
+        let shouldRun = claimed || input.force || hasSteer || hasQueue
         while (shouldRun) {
           let needsContinuation = true
           let step = 1
@@ -415,10 +412,10 @@ const layer = Layer.effect(
             const result = yield* runTurn(input.sessionID, promotion, step)
             needsContinuation = result.needsContinuation
             step = result.step + 1
-            promotion = "steer"
-            if (!needsContinuation) needsContinuation = yield* SessionInput.hasPending(db, input.sessionID, "steer")
+            promotion = claimed ? undefined : "steer"
+            if (!claimed && !needsContinuation) needsContinuation = yield* SessionInput.hasPending(db, input.sessionID, "steer")
           }
-          shouldRun = yield* SessionInput.hasPending(db, input.sessionID, "queue")
+          shouldRun = claimed ? false : yield* SessionInput.hasPending(db, input.sessionID, "queue")
           promotion = shouldRun ? "queue" : undefined
         }
       }).pipe(Effect.catchTag("SessionRunner.ProviderDeclaredFailure", () => Effect.void))

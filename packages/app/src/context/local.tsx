@@ -148,6 +148,18 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       setStore("promoting", undefined)
     })
 
+    createEffect(() => {
+      const session = id()
+      if (!session || saved.session[session] !== undefined) return
+      const info = sync().session.get(session)
+      if (!info?.model) return
+      setSaved("session", session, {
+        agent: info.agent,
+        model: { providerID: info.model.providerID, modelID: info.model.id },
+        variant: info.model.variant,
+      })
+    })
+
     const configuredModel = () => {
       const configured = sync().data.config.model
       if (!configured) return

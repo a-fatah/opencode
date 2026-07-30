@@ -1174,6 +1174,13 @@ describe("IssueWatcher", () => {
         directory: AbsolutePath.make(rerouteRoot.path),
       })
       expect(retried.status).toBe("created")
+      expect(yield* db.select().from(SessionTable).where(eq(
+        SessionTable.id,
+        retried.status === "created" ? retried.sessionID : SessionID.make("missing"),
+      )).get().pipe(Effect.orDie)).toMatchObject({
+        agent: "build",
+        model: { providerID: "github-copilot", id: "gpt-5.6-terra" },
+      })
       expect(yield* db.select().from(IssueMatchTable).where(eq(IssueMatchTable.id, retryMatchID)).get().pipe(Effect.orDie))
         .toMatchObject({ state: "pending" })
       expect(yield* db.select().from(IssueSessionClaimTable).where(and(

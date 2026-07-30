@@ -226,6 +226,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
 
   const session = createServerSession(serverSDK.client, serverSDK.api.session, serverSDK.api.message, {
     protocol: serverSDK.protocol,
+    currentMessagesOnV1: true,
   })
   const queryOptionsApi = makeQueryOptionsApi(
     serverSDK.scope,

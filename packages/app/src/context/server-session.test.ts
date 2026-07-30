@@ -343,6 +343,77 @@ describe("server session", () => {
     expect(store.data.session_message.root.map((message) => message.id)).toEqual([user.id, assistant.id])
   })
 
+  test("prefers current messages for V2-native sessions on a V1 sidecar", async () => {
+    const user = { id: "msg_z_user", type: "user" as const, text: "issue prompt", time: { created: 1 } }
+    const currentRequests: unknown[] = []
+    const legacyRequests: unknown[] = []
+    const client = {
+      session: {
+        messages: async (input: unknown) => {
+          legacyRequests.push(input)
+          return response()
+        },
+      },
+    } as unknown as OpencodeClient
+    const messageApi = {
+      list: async (input: unknown) => {
+        currentRequests.push(input)
+        return { data: [user], cursor: { previous: null, next: null } }
+      },
+    } as unknown as MessageApi
+    const store = createServerSession(client, {} as SessionApi, messageApi, {
+      protocol: Promise.resolve("v1"),
+      currentMessagesOnV1: true,
+    })
+    store.remember(session("root"))
+
+    await store.sync("root")
+
+    expect(currentRequests).toEqual([{ sessionID: "root", limit: 20, order: "desc" }])
+    expect(legacyRequests).toEqual([])
+    expect(store.data.session_message.root).toEqual([user])
+    expect(store.data.message.root).toMatchObject([{ id: user.id, role: "user" }])
+  })
+
+  test("does not pass a current message cursor to the legacy endpoint", async () => {
+    const user = { id: "msg_z_user", type: "user" as const, text: "issue prompt", time: { created: 1 } }
+    const currentRequests: unknown[] = []
+    const legacyRequests: unknown[] = []
+    const pages = [
+      { data: [user], cursor: { previous: null, next: "current-cursor" } },
+      { data: [], cursor: { previous: null, next: null } },
+    ]
+    const client = {
+      session: {
+        messages: async (input: unknown) => {
+          legacyRequests.push(input)
+          throw new Error("legacy message endpoint called")
+        },
+      },
+    } as unknown as OpencodeClient
+    const messageApi = {
+      list: async (input: unknown) => {
+        currentRequests.push(input)
+        return pages.shift()!
+      },
+    } as unknown as MessageApi
+    const store = createServerSession(client, {} as SessionApi, messageApi, {
+      protocol: Promise.resolve("v1"),
+      currentMessagesOnV1: true,
+    })
+    store.remember(session("root"))
+
+    await store.sync("root")
+    await store.history.loadMore("root")
+
+    expect(currentRequests).toEqual([
+      { sessionID: "root", limit: 20, order: "desc" },
+      { sessionID: "root", limit: 200, cursor: "current-cursor" },
+    ])
+    expect(legacyRequests).toEqual([])
+    expect(store.history.more("root")).toBe(false)
+  })
+
   test("backfills an assistant-only initial page through its user root", async () => {
     const user = userMessage("message-1")
     const assistants = [assistantMessage("message-2", user.id), assistantMessage("message-3", user.id)]

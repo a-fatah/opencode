@@ -1,8 +1,11 @@
 export * as IssueWatcherMaterialization from "./materialization"
 
 import { IssueMatch } from "@opencode-ai/schema/issue-match"
+import { Agent as AgentV2 } from "@opencode-ai/schema/agent"
 import { Project } from "@opencode-ai/schema/project"
 import { IssueWatcher } from "@opencode-ai/schema/issue-watcher"
+import { Model as ModelV2 } from "@opencode-ai/schema/model"
+import { Provider as ProviderV2 } from "@opencode-ai/schema/provider"
 import { SessionID } from "@opencode-ai/schema/session-id"
 import { and, desc, eq, inArray, isNotNull } from "drizzle-orm"
 import { Cause, DateTime, Deferred, Effect, Exit, Option, Semaphore } from "effect"
@@ -29,6 +32,10 @@ import {
 } from "./sql"
 
 type Db = Database.Interface["db"]
+const defaultIssueModel = ModelV2.Ref.make({
+  id: ModelV2.ID.make("gpt-5.6-terra"),
+  providerID: ProviderV2.ID.githubCopilot,
+})
 
 export interface Provenance {
   readonly sessionID: SessionID
@@ -155,7 +162,12 @@ export const make = Effect.fn("IssueWatcherMaterialization.make")(function* (inp
     yield* input.db.update(IssueMaterializationTable).set({ resolved_location: provisioned.location })
       .where(eq(IssueMaterializationTable.id, initial.id)).run().pipe(Effect.orDie)
 
-    const session = yield* input.sessions.create({ id: SessionID.make(initial.session_id), location: provisioned.location })
+    const session = yield* input.sessions.create({
+      id: SessionID.make(initial.session_id),
+      location: provisioned.location,
+      agent: AgentV2.ID.make("build"),
+      model: defaultIssueModel,
+    })
     if (
       session.location.directory !== provisioned.location.directory ||
       (session.location.workspaceID ?? undefined) !== (provisioned.location.workspaceID ?? undefined)

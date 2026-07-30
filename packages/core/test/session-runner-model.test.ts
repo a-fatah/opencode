@@ -251,6 +251,39 @@ describe("SessionRunnerModel", () => {
     }),
   )
 
+  it.effect("maps GitHub Copilot GPT-5 models into authenticated Responses routes", () =>
+    Effect.gen(function* () {
+      const catalog = ModelV2.Info.make({
+        ...model({ type: "aisdk", package: "@ai-sdk/github-copilot", url: "https://api.githubcopilot.test" }),
+        id: ModelV2.ID.make("gpt-5.6-terra"),
+        providerID: ProviderV2.ID.githubCopilot,
+        api: {
+          id: ModelV2.ID.make("gpt-5.6-terra"),
+          type: "aisdk",
+          package: "@ai-sdk/github-copilot",
+          url: "https://api.githubcopilot.test",
+        },
+      })
+      const resolved = yield* SessionRunnerModel.fromCatalogModel(
+        catalog,
+        Credential.Key.make({ type: "key", key: "copilot-token" }),
+      )
+
+      expect(SessionRunnerModel.supported(catalog)).toBe(true)
+      expect(resolved.route).toMatchObject({
+        id: "openai-responses",
+        endpoint: { baseURL: "https://api.githubcopilot.test" },
+        defaults: {
+          headers: {
+            "X-GitHub-Api-Version": "2025-04-01",
+            "Openai-Intent": "conversation-edits",
+            "x-initiator": "user",
+          },
+        },
+      })
+    }),
+  )
+
   it.effect("uses resolved credentials for bearer auth", () =>
     Effect.gen(function* () {
       const resolved = yield* SessionRunnerModel.fromCatalogModel(

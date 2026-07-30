@@ -199,7 +199,11 @@ function reconcileFetched<T extends { id: string }>(
   return [...result.values()].sort((a, b) => cmp(a.id, b.id))
 }
 
-type ServerSessionOptions = { retry?: typeof retry; protocol?: Promise<"v1" | "v2"> }
+type ServerSessionOptions = {
+  retry?: typeof retry
+  protocol?: Promise<"v1" | "v2">
+  currentMessagesOnV1?: boolean
+}
 
 export function createServerSession(
   client: OpencodeClient,
@@ -554,34 +558,45 @@ export function createServerSession(
     )
 
   const fetchMessages = async (sessionID: string, limit: number, before?: string, onAttempt?: () => void) => {
-    if (messageApi && (await options?.protocol) !== "v1") {
+    if (messageApi) {
+      const protocol = options?.protocol ? await options.protocol : undefined
+      if (protocol === "v1" && !options?.currentMessagesOnV1) return legacyMessages()
       const request = (cursor?: string) =>
         (options?.retry ?? retry)(() => {
           onAttempt?.()
           return messageApi.list(cursor ? { sessionID, limit, cursor } : { sessionID, limit, order: "desc" })
         })
-      const first = await request(before)
-      const pages = [first]
-      while (pages.at(-1)?.cursor.next && needsOlderTurnRoot(pages.flatMap((page) => page.data).toReversed())) {
-        const response = await request(pages.at(-1)!.cursor.next ?? undefined)
-        pages.push(response)
-        if (!response.data.length) break
-      }
-      const response = pages.at(-1)!
-      const source = pages.flatMap((page) => page.data).toReversed()
-      const normalized = normalizeSessionMessages(sessionID, source)
-      return {
-        session: normalized.messages.sort((a, b) => cmp(a.id, b.id)),
-        part: [...normalized.parts.entries()]
-          .map(([id, part]) => ({ id, part: part.sort((a, b) => cmp(a.id, b.id)) }))
-          .sort((a, b) => cmp(a.id, b.id)),
-        source,
-        sourceMode: before ? ("older" as const) : ("latest" as const),
-        projectSource: true,
-        cursor: response.cursor.next ?? undefined,
-        complete: response.data.length === 0,
+      const first = await request(before).catch((error) => {
+        if (protocol !== "v1") throw error
+        return undefined
+      })
+      if (first) {
+        const pages = [first]
+        while (pages.at(-1)?.cursor.next && needsOlderTurnRoot(pages.flatMap((page) => page.data).toReversed())) {
+          const response = await request(pages.at(-1)!.cursor.next ?? undefined)
+          pages.push(response)
+          if (!response.data.length) break
+        }
+        const response = pages.at(-1)!
+        const source = pages.flatMap((page) => page.data).toReversed()
+        const normalized = normalizeSessionMessages(sessionID, source)
+        const current = {
+          session: normalized.messages.sort((a, b) => cmp(a.id, b.id)),
+          part: [...normalized.parts.entries()]
+            .map(([id, part]) => ({ id, part: part.sort((a, b) => cmp(a.id, b.id)) }))
+            .sort((a, b) => cmp(a.id, b.id)),
+          source,
+          sourceMode: before ? ("older" as const) : ("latest" as const),
+          projectSource: true,
+          cursor: response.cursor.next ?? undefined,
+          complete: response.data.length === 0,
+        }
+        if (protocol !== "v1" || source.length > 0 || before !== undefined) return current
       }
     }
+    return legacyMessages()
+
+    async function legacyMessages() {
     const response = await (options?.retry ?? retry)(() => {
       onAttempt?.()
       return client.session.messages({ sessionID, limit, before })
@@ -598,19 +613,30 @@ export function createServerSession(
       cursor: response.response.headers.get("x-next-cursor") ?? undefined,
       complete: !response.response.headers.get("x-next-cursor"),
     }
+    }
   }
 
   const fetchMessage = async (sessionID: string, messageID: string, onAttempt?: () => void) => {
-    if (sessionApi && (await options?.protocol) !== "v1") {
+    if (sessionApi) {
+      const protocol = options?.protocol ? await options.protocol : undefined
+      if (protocol === "v1" && !options?.currentMessagesOnV1) return legacyMessage()
       const response = await (options?.retry ?? retry)(() => {
         onAttempt?.()
         return sessionApi.message({ sessionID, messageID })
+      }).catch((error) => {
+        if (protocol !== "v1") throw error
+        return undefined
       })
-      const normalized = normalizeSessionMessages(sessionID, [response])
-      const message = normalized.messages[0]
-      if (!message) throw new Error(`Message not found: ${messageID}`)
-      return { message, parts: normalized.parts.get(messageID) ?? [] }
+      if (response) {
+        const normalized = normalizeSessionMessages(sessionID, [response])
+        const message = normalized.messages[0]
+        if (message) return { message, parts: normalized.parts.get(messageID) ?? [] }
+      }
+      if (protocol !== "v1") throw new Error(`Message not found: ${messageID}`)
     }
+    return legacyMessage()
+
+    async function legacyMessage() {
     const response = await (options?.retry ?? retry)(() => {
       onAttempt?.()
       return client.session.message({ sessionID, messageID })
@@ -619,6 +645,7 @@ export function createServerSession(
     return {
       message: cleanMessage(response.data.info),
       parts: response.data.parts.filter((part) => !!part?.id).sort((a, b) => cmp(a.id, b.id)),
+    }
     }
   }
 

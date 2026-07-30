@@ -1503,7 +1503,10 @@ const layer = Layer.effect(
               projects: finalSnapshot?.global?.projects ?? [],
               users: uniqueMetadataOptions(projects.flatMap((project) => project.users)),
               labels: finalSnapshot?.global?.labels ?? [],
-              statuses: uniqueMetadataOptions(projects.flatMap((project) => project.statuses)),
+              statuses: uniqueMetadataOptions([
+                ...(finalSnapshot?.global?.statuses ?? []),
+                ...projects.flatMap((project) => project.statuses),
+              ]),
               components: uniqueMetadataOptions(projects.flatMap((project) => project.components)),
               issueTypes: uniqueMetadataOptions(projects.flatMap((project) => project.issueTypes)),
               fields: finalSnapshot?.global?.fields ?? [],

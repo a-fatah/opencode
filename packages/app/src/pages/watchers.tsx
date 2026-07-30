@@ -1,5 +1,6 @@
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { Avatar } from "@opencode-ai/ui/v2/avatar-v2"
+import { Tag } from "@opencode-ai/ui/v2/badge-v2"
 import { SelectV2 } from "@opencode-ai/ui/v2/select-v2"
 import { Switch } from "@opencode-ai/ui/v2/switch-v2"
 import { TextareaV2 } from "@opencode-ai/ui/v2/textarea-v2"
@@ -46,6 +47,7 @@ type PreviewInput = IssueWatchersPreviewInput
 type MetadataResult = IssueWatchersMetadataOutput
 type Metadata = MetadataResult["metadata"]
 type MetadataOption = Metadata["users"][number]
+type RoutingProject = { readonly id: string; readonly name?: string; readonly worktree: string }
 type EditorState = {
   draft: WatcherDraft
   section: "criteria" | "routing" | "action"
@@ -265,7 +267,7 @@ export function WatcherEditorPage() {
     () => `${serverSdk().scope}:${params.watcherID}`,
     async () => {
       const api = issueWatcherApi(serverSdk())
-      const [sources, settings, watcher, history] = await Promise.all([
+      const [sources, settings, watcher, history, projects] = await Promise.all([
         api.sources(),
         api.getSettings(),
         isNew() ? undefined : api.get({ watcherID: params.watcherID }),
@@ -273,6 +275,7 @@ export function WatcherEditorPage() {
           setStore("historyError", error.message)
           return undefined
         }),
+        serverSdk().api.project.list(),
       ])
       if (watcher) {
         setStore("draft", reconcile({
@@ -300,7 +303,7 @@ export function WatcherEditorPage() {
         setStore("historyCursor", history.nextCursor)
       }
       setStore("loaded", true)
-      return { sources, settings, watcher }
+      return { sources, settings, watcher, projects: projects as readonly RoutingProject[] }
     },
   )
   const connectedSources = createMemo(() => (loaded()?.sources ?? []).filter((source) => source.connection))
@@ -530,7 +533,7 @@ export function WatcherEditorPage() {
             <Show when={store.section === "routing"}><RoutingEditor store={store} setStore={setStore} metadata={store.metadataResult?.metadata} metadataLoading={metadataGlobalLoading(store.metadataResult, store.metadataLoading)} projectLoading={metadataProjectLoading(store.metadataResult, store.draft.criteria.issueProjects)} /></Show>
             <Show when={store.section === "action"}><ActionEditor store={store} setStore={setStore} concurrentRuns={loaded()?.settings.concurrentRuns ?? 1} metadata={store.metadataResult?.metadata} projectLoading={metadataProjectLoading(store.metadataResult, store.draft.criteria.issueProjects)} /></Show>
           </section>
-          <PreviewPane section={store.section} preview={store.preview} busy={store.previewBusy} error={store.previewError} draft={store.draft} sourceName={selectedSource()?.integration.name ?? store.draft.integrationID} />
+          <PreviewPane section={store.section} preview={store.preview} busy={store.previewBusy} error={store.previewError} draft={store.draft} sourceName={selectedSource()?.integration.name ?? store.draft.integrationID} projects={loaded()?.projects ?? []} />
         </div>
         <div class="mt-5"><SafetyCopy /></div>
         <Show when={!isNew()}><WatcherHistory entries={store.history} error={store.historyError} nextCursor={store.historyCursor} loading={store.historyLoading} onRetry={refreshHistory} onLoadMore={loadMoreHistory} /></Show>
@@ -623,10 +626,19 @@ function ActionEditor(props: { store: EditorState; setStore: EditorSetter; concu
   )
 }
 
-function PreviewPane(props: { section: "criteria" | "routing" | "action"; preview?: PreviewOutput; busy: boolean; error: string; draft: WatcherDraft; sourceName: string }) {
-  const routeText = (route: PreviewMatch["route"]) => "projectID" in route
-    ? `${route.projectID} · ${route.reason}`
-    : `Inbox · ${route.reason}${route.suggestion ? ` · Suggested: ${route.suggestion}` : ""}`
+function PreviewPane(props: { section: "criteria" | "routing" | "action"; preview?: PreviewOutput; busy: boolean; error: string; draft: WatcherDraft; sourceName: string; projects: readonly RoutingProject[] }) {
+  const projectName = (id: string) => {
+    const project = props.projects.find((item) => item.id === id)
+    return project?.name ?? project?.worktree.split(/[\\/]/).filter(Boolean).at(-1) ?? "Unknown project"
+  }
+  const routeOutcome = (route: PreviewMatch["route"]) => "projectID" in route
+    ? { title: `Routes to ${projectName(route.projectID)}`, detail: route.reason }
+    : {
+        title: "Keeps in Inbox",
+        detail: route.suggestion
+          ? `${route.reason}. Suggested destination: ${projectName(route.suggestion)}`
+          : route.reason,
+      }
   const writebackText = (writeback: PreviewMatch["writeback"]) => [
     writeback.comment,
     writeback.transitionOnStart ? `Transition on start: ${writeback.transitionOnStart}` : undefined,
@@ -642,7 +654,43 @@ function PreviewPane(props: { section: "criteria" | "routing" | "action"; previe
         <Show when={canPreview(props.draft) && hasPreviewCriteria(props.draft) && props.preview && !props.preview.matches.length}><Status>No issues match these criteria right now.</Status></Show>
         <div class="mt-4 flex flex-col gap-3">
           <For each={props.preview?.matches}>
-            {(match) => <article class="rounded-lg border border-v2-border-border-base bg-v2-background-bg-surface p-3"><div class="flex gap-2.5"><IssueSourceIcon integrationID={props.draft.integrationID} sourceName={props.sourceName} class="size-7 rounded-md" /><div class="min-w-0"><p class="text-13-medium text-v2-text-text-strong">{match.issue.key ?? match.issue.id ?? "Issue"}</p><p class="mt-1 text-12-regular text-v2-text-text-muted">{match.issue.title}</p></div></div><Show when={props.section !== "action"}><div class="mt-3 border-t border-v2-border-border-base pt-2 text-11-regular text-v2-text-text-muted"><span class="font-medium">Route rung:</span> {routeText(match.route)}</div></Show><Show when={props.section === "action"}><div class="mt-3 flex flex-col gap-3 border-t border-v2-border-border-base pt-3"><PreviewBlock label="Rendered prompt" value={match.prompt} /><PreviewBlock label="Exact write-back" value={writebackText(match.writeback)} /></div></Show></article>}
+            {(match) => (
+              <article class="rounded-lg border border-v2-border-border-base bg-v2-background-bg-surface p-3">
+                <div class="flex gap-2.5">
+                  <IssueSourceIcon integrationID={props.draft.integrationID} sourceName={props.sourceName} class="size-7 shrink-0 rounded-md" />
+                  <div class="min-w-0 flex-1">
+                    <p class="text-11-medium uppercase tracking-[0.06em] text-v2-text-text-muted">
+                      {match.issue.key ?? match.issue.id ?? "Issue"}
+                    </p>
+                    <p class="mt-1 line-clamp-2 text-13-medium leading-5 text-v2-text-text-strong">
+                      {match.issue.title}
+                    </p>
+                    <div class="mt-2.5 flex flex-wrap items-center gap-1.5">
+                      <Tag data-high-contrast>{match.issue.status}</Tag>
+                      <span class="inline-flex h-5 min-w-0 max-w-full items-center gap-1.5 rounded border border-v2-border-border-base bg-v2-background-bg-base px-1.5 text-11-regular text-v2-text-text-muted">
+                        <Show when={match.issue.assignee} fallback={<span>Unassigned</span>}>
+                          {(assignee) => (
+                            <>
+                              <Avatar fallback={assignee().name} size="small" />
+                              <span class="truncate">{assignee().name}</span>
+                            </>
+                          )}
+                        </Show>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <Show when={props.section !== "action"}>
+                  <div class="mt-3 border-t border-v2-border-border-base pt-2">
+                    <p class="text-11-medium text-v2-text-text-base">{routeOutcome(match.route).title}</p>
+                    <p class="mt-0.5 text-11-regular text-v2-text-text-muted">{routeOutcome(match.route).detail}</p>
+                  </div>
+                </Show>
+                <Show when={props.section === "action"}>
+                  <div class="mt-3 flex flex-col gap-3 border-t border-v2-border-border-base pt-3"><PreviewBlock label="Rendered prompt" value={match.prompt} /><PreviewBlock label="Exact write-back" value={writebackText(match.writeback)} /></div>
+                </Show>
+              </article>
+            )}
           </For>
         </div>
         <Show when={props.preview?.truncated}><p class="mt-3 text-11-regular text-v2-text-text-muted">Preview limit reached. Narrow the criteria to inspect fewer issues.</p></Show>

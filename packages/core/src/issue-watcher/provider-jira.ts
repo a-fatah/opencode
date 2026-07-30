@@ -168,10 +168,11 @@ export function makeJira(http: HttpClient.HttpClient): IssueProvider.Adapter {
       return { ok: true, detail: `Connected as ${user.displayName}` }
     }),
     metadataGlobal: Effect.fn("Jira.metadataGlobal")(function* (credential) {
-      const [jiraProjects, labels, fields] = yield* Effect.all(
+      const [jiraProjects, labels, statuses, fields] = yield* Effect.all(
         [
           projects(credential),
           execute(credential, "/rest/api/3/label?maxResults=1000", JiraLabels),
+          execute(credential, "/rest/api/3/status", Schema.Array(JiraStatus)),
           execute(credential, "/rest/api/3/field", Schema.Array(JiraField)),
         ],
         { concurrency: "unbounded" },
@@ -184,6 +185,7 @@ export function makeJira(http: HttpClient.HttpClient): IssueProvider.Adapter {
           ...(project.avatarUrls?.["24x24"] ? { imageUrl: project.avatarUrls["24x24"] } : {}),
         })),
         labels: [...new Set(labels.values)].sort((a, b) => a.localeCompare(b)),
+        statuses: uniqueOptions(statuses),
         fields: uniqueOptions(
           fields.filter((field) => field.custom).map((field) => ({ id: field.id, name: field.name })),
         ),

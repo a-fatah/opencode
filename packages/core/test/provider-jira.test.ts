@@ -106,6 +106,11 @@ describe("Jira issue provider", () => {
         })
       if (requestUrl.pathname === "/rest/api/3/label")
         return Response.json({ values: ["backend", "urgent", "backend"] })
+      if (requestUrl.pathname === "/rest/api/3/status")
+        return Response.json([
+          { id: "status-2", name: "In Review" },
+          { id: "status-1", name: "Open" },
+        ])
       if (requestUrl.pathname === "/rest/api/3/field")
         return Response.json([
           { id: "summary", name: "Summary", custom: false },
@@ -147,6 +152,10 @@ describe("Jira issue provider", () => {
       issueTypes: [{ id: "type-1", name: "Bug", imageUrl: "https://example.test/bug.png" }],
       fields: [{ id: "customfield_1", name: "Repository" }],
     })
+    expect(global.statuses).toEqual([
+      { id: "status-2", name: "In Review" },
+      { id: "status-1", name: "Open" },
+    ])
     expect(
       http.requests.filter((request) => url(request).pathname === "/rest/api/3/project/ENG/statuses"),
     ).toHaveLength(1)
@@ -170,6 +179,7 @@ describe("Jira issue provider", () => {
           ],
         })
       if (pathname === "/rest/api/3/label") return Response.json({ values: [] })
+      if (pathname === "/rest/api/3/status") return Response.json([])
       if (pathname === "/rest/api/3/field") return Response.json([])
       if (pathname === "/rest/api/3/user/assignable/multiProjectSearch")
         return requestUrl.searchParams.get("projectKeys") === "ENG"
@@ -206,6 +216,7 @@ describe("Jira issue provider", () => {
         })
       }
       if (requestUrl.pathname === "/rest/api/3/label") return Response.json({ values: [] })
+      if (requestUrl.pathname === "/rest/api/3/status") return Response.json([])
       if (requestUrl.pathname === "/rest/api/3/field") return Response.json([])
       if (requestUrl.pathname === "/rest/api/3/user/assignable/multiProjectSearch") return Response.json([])
       return new Response(null, { status: 404 })

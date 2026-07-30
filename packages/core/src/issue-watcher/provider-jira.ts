@@ -54,7 +54,12 @@ const JiraMetadataUser = Schema.Struct({
   active: Schema.optional(Schema.Boolean),
   avatarUrls: Schema.optional(JiraAvatarUrls),
 })
-const JiraLabels = Schema.Struct({ values: Schema.Array(Schema.String) })
+const JiraLabels = Schema.Struct({
+  values: Schema.Array(Schema.String),
+  total: Schema.optional(Schema.Number),
+  maxResults: Schema.optional(Schema.Number),
+  isLast: Schema.optional(Schema.Boolean),
+})
 const JiraStatus = Schema.Struct({ id: Schema.String, name: Schema.String })
 const JiraIssueTypeStatuses = Schema.Struct({
   id: Schema.String,
@@ -151,6 +156,30 @@ export function makeJira(http: HttpClient.HttpClient): IssueProvider.Adapter {
     ].toSorted((left, right) => left.name.localeCompare(right.name))
   })
 
+  const loadLabels = Effect.fn("Jira.labels")(function* (credential: Credential.Key) {
+    const requestedPageSize = 1000
+    const first = yield* execute(
+      credential,
+      `/rest/api/3/label?startAt=0&maxResults=${requestedPageSize}`,
+      JiraLabels,
+    )
+    const pageSize = Math.max(1, first.maxResults ?? requestedPageSize)
+    const total = first.total ?? first.values.length
+    const offsets = first.isLast === true
+      ? []
+      : Array.from({ length: Math.ceil(total / pageSize) - 1 }, (_, index) => (index + 1) * pageSize)
+    const remaining = yield* Effect.forEach(
+      offsets,
+      (startAt) => execute(
+        credential,
+        `/rest/api/3/label?startAt=${startAt}&maxResults=${requestedPageSize}`,
+        JiraLabels,
+      ),
+      { concurrency: 4 },
+    )
+    return [...new Set([first, ...remaining].flatMap((page) => page.values))].sort((a, b) => a.localeCompare(b))
+  })
+
   return {
     integrationID,
     name: "Jira",
@@ -171,7 +200,7 @@ export function makeJira(http: HttpClient.HttpClient): IssueProvider.Adapter {
       const [jiraProjects, labels, statuses, fields] = yield* Effect.all(
         [
           projects(credential),
-          execute(credential, "/rest/api/3/label?maxResults=1000", JiraLabels),
+          loadLabels(credential),
           execute(credential, "/rest/api/3/status", Schema.Array(JiraStatus)),
           execute(credential, "/rest/api/3/field", Schema.Array(JiraField)),
         ],
@@ -184,7 +213,7 @@ export function makeJira(http: HttpClient.HttpClient): IssueProvider.Adapter {
           name: project.name,
           ...(project.avatarUrls?.["24x24"] ? { imageUrl: project.avatarUrls["24x24"] } : {}),
         })),
-        labels: [...new Set(labels.values)].sort((a, b) => a.localeCompare(b)),
+        labels,
         statuses: uniqueOptions(statuses),
         fields: uniqueOptions(
           fields.filter((field) => field.custom).map((field) => ({ id: field.id, name: field.name })),

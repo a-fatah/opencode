@@ -291,6 +291,24 @@ export function TitlebarTabStrip(props: {
     },
   ])
 
+  command.register("titlebar-tab-shortcuts", () =>
+    visibleTabs()
+      .slice(0, 9)
+      .map((tab, index) => ({
+        id: `tab.${index + 1}`,
+        category: "tab",
+        title: "",
+        keybind: `mod+${index + 1}`,
+        hidden: true,
+        onSelect: () => {
+          const element = listRef
+            .querySelector<HTMLDivElement>(`[data-tab-key="${CSS.escape(tabKey(tab))}"]`)
+            ?.querySelector<HTMLDivElement>("[data-titlebar-tab]")
+          props.onNavigate(tab, element ?? undefined)
+        },
+      })),
+  )
+
   function selectAdjacentTab(offset: -1 | 1) {
     const current = props.currentTab()
     const key = adjacentTabKey(visibleTabIds(), current ? tabKey(current) : undefined, offset)
@@ -382,7 +400,6 @@ export function TitlebarTabStrip(props: {
                 const id = tabKey(tab)
                 let ref!: HTMLDivElement
                 const visibleIndex = () => visibleTabs().findIndex((item) => tabKey(item) === id)
-                useTabShortcut(visibleIndex, () => props.onNavigate(tab, ref))
                 const serverCtx = createMemo(() => {
                   if (tab.type !== "session") return
                   const conn = global.servers.list().find((item) => ServerConnection.key(item) === tab.server)
@@ -462,23 +479,4 @@ export function TitlebarTabStrip(props: {
       />
     </div>
   )
-}
-
-function useTabShortcut(index: () => number, onSelect: () => void) {
-  const command = useCommand()
-
-  command.register(() => {
-    const number = index() + 1
-    if (number < 1 || number > 9) return []
-    return [
-      {
-        id: `tab.${number}`,
-        category: "tab",
-        title: "",
-        keybind: `mod+${number}`,
-        hidden: true,
-        onSelect,
-      },
-    ]
-  })
 }

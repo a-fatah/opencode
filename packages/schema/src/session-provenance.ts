@@ -2,8 +2,10 @@ export * as SessionProvenance from "./session-provenance"
 
 import { Schema } from "effect"
 import { Integration } from "./integration"
+import { Issue } from "./issue"
 import { IssueMatch } from "./issue-match"
 import { IssueWatcher } from "./issue-watcher"
+import { Location } from "./location"
 import { DateTimeUtcFromMillis, optional } from "./schema"
 import { SessionID } from "./session-id"
 
@@ -39,3 +41,30 @@ export const Info = Schema.Struct({
   timeCreated: DateTimeUtcFromMillis,
   timeUpdated: DateTimeUtcFromMillis,
 }).annotate({ identifier: "SessionProvenance.Info" })
+
+export interface SourceSnapshot extends Schema.Schema.Type<typeof SourceSnapshot> {}
+export const SourceSnapshot = Schema.Struct({
+  integrationID: Integration.ID,
+  name: Schema.String,
+  glyph: Schema.String,
+}).annotate({ identifier: "SessionProvenance.SourceSnapshot" })
+
+export interface WatcherSnapshot extends Schema.Schema.Type<typeof WatcherSnapshot> {}
+export const WatcherSnapshot = Schema.Struct({
+  id: optional(Schema.suspend(() => IssueWatcher.ID)),
+  name: Schema.String,
+}).annotate({ identifier: "SessionProvenance.WatcherSnapshot" })
+
+export interface Detail extends Schema.Schema.Type<typeof Detail> {}
+export const Detail = Schema.Struct({
+  provenance: Info,
+  issue: Issue.Info,
+  source: SourceSnapshot,
+  watcher: WatcherSnapshot,
+  branch: optional(Schema.String),
+  workspace: optional(Location.Ref),
+  sessions: Schema.Array(IssueMatch.SessionLink),
+  materialization: optional(IssueMatch.Materialization),
+  writebacks: Schema.Array(IssueMatch.WritebackOperation),
+  lastSyncedAt: optional(DateTimeUtcFromMillis),
+}).annotate({ identifier: "SessionProvenance.Detail" })

@@ -46,6 +46,7 @@ const SESSION_INFO_LIFECYCLE_EVENTS = new Set([
   "session.execution.failed",
   "session.execution.interrupted",
   "session.execution.superseded",
+  "issue_watcher.session.materialized",
 ])
 
 function needsOlderTurnRoot(source: readonly SessionMessageInfo[]) {

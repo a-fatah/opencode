@@ -6,10 +6,12 @@ import {
   emptyWatcherDraft,
   inboxActions,
   inboxAttentionCount,
+  inboxBulkActionSupports,
   inboxQuery,
   outcomeLabel,
   routeRungs,
   routingSummary,
+  selectableInboxItem,
   splitValues,
   watcherAuthExpired,
 } from "./logic"
@@ -52,22 +54,30 @@ describe("watcher editor logic", () => {
 describe("watcher inbox logic", () => {
   test("uses server filters for every paginated view", () => {
     expect(inboxQuery("all")).toEqual({})
-    expect(inboxQuery("attention")).toEqual({ attention: true })
+    expect(inboxQuery("attention")).toEqual({ filter: "attention" })
     expect(inboxQuery("dismissed")).toEqual({ state: "dismissed" })
     expect(inboxQuery("source:jira")).toEqual({ integrationID: "jira" })
   })
 
   test("describes every disabled inbox action state", () => {
-    expect(inboxActions("pending")).toEqual(["Create & run", "Awaiting run", "Skip"])
+    expect(inboxActions("pending")).toEqual(["Create & run", "Awaiting run", "Skip", "Dismiss"])
     expect(inboxActions("unrouted")).toEqual(["Pick project", "Skip"])
     expect(inboxActions("duplicate")).toEqual(["Open session", "Dismiss"])
-    expect(inboxActions("skipped")).toEqual(["Create & run", "Skipped"])
-    expect(inboxActions("dismissed")).toEqual(["Create & run", "Dismissed"])
+    expect(inboxActions("skipped")).toEqual([])
+    expect(inboxActions("dismissed")).toEqual([])
   })
 
   test("combines attention counters and labels run outcomes", () => {
-    expect(inboxAttentionCount({ unrouted: 2, duplicate: 3, failedMaterializations: 1 })).toBe(5)
+    expect(inboxAttentionCount({ unrouted: 2, duplicate: 3, failedMaterializations: 1 })).toBe(6)
     expect(outcomeLabel("auth_failed")).toBe("Authentication expired")
+  })
+
+  test("selects actionable states and validates each bulk action", () => {
+    const states = ["pending", "skipped", "dismissed", "duplicate", "unrouted"] as const
+    expect(states.filter(selectableInboxItem)).toEqual(["pending", "duplicate", "unrouted"])
+    expect(states.filter((state) => inboxBulkActionSupports("approve", state))).toEqual(["pending"])
+    expect(states.filter((state) => inboxBulkActionSupports("skip", state))).toEqual(["pending", "unrouted"])
+    expect(states.filter((state) => inboxBulkActionSupports("dismiss", state))).toEqual(["pending", "duplicate"])
   })
 
   test("preserves the cursor guarantee in expired-auth copy", () => {

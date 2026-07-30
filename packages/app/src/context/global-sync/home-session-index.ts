@@ -2,7 +2,7 @@ import type { Event, Session, SessionV2Info, V2SessionListResponse } from "@open
 import type { QueryClient } from "@tanstack/solid-query"
 import { trimSessions } from "./session-trim"
 import { pathKey } from "@/utils/path-key"
-import { sessionStatus, type AppSession } from "@/utils/session"
+import { sessionProvenance, sessionStatus, type AppSession } from "@/utils/session"
 
 export const HOME_V2_SESSION_PAGE_LIMIT = 5_000
 
@@ -94,7 +94,11 @@ export function homeSessionIndexRefresh(event: Event["type"] | string, connected
   if (event === "server.connected") return { connected: true, refetch: connected }
   return {
     connected,
-    refetch: event === "global.disposed" || event === "session.next.moved" || SESSION_LIFECYCLE_EVENTS.has(event),
+    refetch:
+      event === "global.disposed" ||
+      event === "session.next.moved" ||
+      event === "issue_watcher.session.materialized" ||
+      SESSION_LIFECYCLE_EVENTS.has(event),
   }
 }
 
@@ -187,6 +191,7 @@ function toLegacySummary(session: SessionV2Info): AppSession {
     model: session.model,
     version: "",
     status: sessionStatus(session),
+    provenance: sessionProvenance(session),
     time: session.time,
   }
 }

@@ -105,7 +105,8 @@ import { createSessionOwnership } from "./session/session-ownership"
 import { createSessionLineage } from "./session/session-lineage"
 import { AwaitingRunPanel } from "./session/awaiting-run-panel"
 import { awaitingRunVisible, type AwaitingRunState } from "./session/awaiting-run"
-import { sessionStatus } from "@/utils/session"
+import { sessionProvenance, sessionStatus } from "@/utils/session"
+import { SessionProvenancePanel } from "./session/session-provenance-panel"
 
 type FollowupItem = FollowupDraft & { id: string }
 type FollowupEdit = Pick<FollowupItem, "id" | "prompt" | "context">
@@ -2065,6 +2066,15 @@ export default function Page() {
       <Show when={!isDesktop() && !!params.id && settings.general.newLayoutDesigns() && !mobileTabsBottom()}>
         {mobileTabs(true)}
       </Show>
+      <Show when={params.id && sessionProvenance(info()) ? { sessionID: params.id, provenance: sessionProvenance(info())! } : undefined}>
+        {(source) => (
+          <SessionProvenancePanel
+            sessionID={source().sessionID}
+            provenance={source().provenance}
+            serverSDK={serverSDK()}
+          />
+        )}
+      </Show>
       <div class="flex-1 min-h-0 overflow-hidden">
         <Switch>
           <Match when={params.id && mobileChanges()}>
@@ -2152,6 +2162,8 @@ export default function Page() {
               current={prompt.current}
               setPrompt={prompt.set}
               refreshSession={() => serverSync().session.resolve(sessionID, { force: true })}
+              branch={sessionProvenance(info())?.branch}
+              workspace={info()?.directory}
             />
           )
         }}

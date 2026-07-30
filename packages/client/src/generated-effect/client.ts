@@ -220,12 +220,131 @@ const Endpoint1_17 = (raw: RawClient["server.issueWatcher"]) => (input?: Endpoin
 const Endpoint1_18 = (raw: RawClient["server.issueWatcher"]) => () =>
   raw["issueWatcher.inboxSummary"]({}).pipe(Effect.mapError(mapClientError))
 
-type Endpoint1_19Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.enable"]>[0]
+type Endpoint1_19Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.bulk"]>[0]
 type Endpoint1_19Input = {
-  readonly watcherID: Endpoint1_19Request["params"]["watcherID"]
-  readonly enabled: Endpoint1_19Request["payload"]["enabled"]
+  readonly matchIDs: Endpoint1_19Request["payload"]["matchIDs"]
+  readonly action: Endpoint1_19Request["payload"]["action"]
+  readonly mode?: Endpoint1_19Request["payload"]["mode"]
 }
 const Endpoint1_19 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_19Input) =>
+  raw["issueWatcher.bulk"]({
+    payload: { matchIDs: input["matchIDs"], action: input["action"], mode: input["mode"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint1_20Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.approve"]>[0]
+type Endpoint1_20Input = {
+  readonly matchID: Endpoint1_20Request["params"]["matchID"]
+  readonly mode: Endpoint1_20Request["payload"]["mode"]
+  readonly projectID?: Endpoint1_20Request["payload"]["projectID"]
+  readonly workspace?: Endpoint1_20Request["payload"]["workspace"]
+}
+const Endpoint1_20 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_20Input) =>
+  raw["issueWatcher.approve"]({
+    params: { matchID: input["matchID"] },
+    payload: { mode: input["mode"], projectID: input["projectID"], workspace: input["workspace"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint1_21Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.routeMatch"]>[0]
+type Endpoint1_21Input = {
+  readonly matchID: Endpoint1_21Request["params"]["matchID"]
+  readonly projectID: Endpoint1_21Request["payload"]["projectID"]
+  readonly persistMapping?: Endpoint1_21Request["payload"]["persistMapping"]
+}
+const Endpoint1_21 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_21Input) =>
+  raw["issueWatcher.routeMatch"]({
+    params: { matchID: input["matchID"] },
+    payload: { projectID: input["projectID"], persistMapping: input["persistMapping"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint1_22Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.skip"]>[0]
+type Endpoint1_22Input = { readonly matchID: Endpoint1_22Request["params"]["matchID"] }
+const Endpoint1_22 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_22Input) =>
+  raw["issueWatcher.skip"]({ params: { matchID: input["matchID"] } }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint1_23Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.dismiss"]>[0]
+type Endpoint1_23Input = { readonly matchID: Endpoint1_23Request["params"]["matchID"] }
+const Endpoint1_23 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_23Input) =>
+  raw["issueWatcher.dismiss"]({ params: { matchID: input["matchID"] } }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint1_24Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.rematerialize"]>[0]
+type Endpoint1_24Input = {
+  readonly matchID: Endpoint1_24Request["params"]["matchID"]
+  readonly mode: Endpoint1_24Request["payload"]["mode"]
+  readonly projectID?: Endpoint1_24Request["payload"]["projectID"]
+  readonly workspace?: Endpoint1_24Request["payload"]["workspace"]
+}
+const Endpoint1_24 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_24Input) =>
+  raw["issueWatcher.rematerialize"]({
+    params: { matchID: input["matchID"] },
+    payload: { mode: input["mode"], projectID: input["projectID"], workspace: input["workspace"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint1_25Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.duplicateDetail"]>[0]
+type Endpoint1_25Input = { readonly matchID: Endpoint1_25Request["params"]["matchID"] }
+const Endpoint1_25 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_25Input) =>
+  raw["issueWatcher.duplicateDetail"]({ params: { matchID: input["matchID"] } }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint1_26Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.resolveDuplicate"]>[0]
+type Endpoint1_26Input = {
+  readonly matchID: Endpoint1_26Request["params"]["matchID"]
+  readonly action: Endpoint1_26Request["payload"]["action"]
+  readonly mode?: Endpoint1_26Request["payload"]["mode"]
+  readonly projectID?: Endpoint1_26Request["payload"]["projectID"]
+  readonly workspace?: Endpoint1_26Request["payload"]["workspace"]
+}
+const Endpoint1_26 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_26Input) =>
+  raw["issueWatcher.resolveDuplicate"]({
+    params: { matchID: input["matchID"] },
+    payload: {
+      action: input["action"],
+      mode: input["mode"],
+      projectID: input["projectID"],
+      workspace: input["workspace"],
+    },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint1_27Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.addIgnore"]>[0]
+type Endpoint1_27Input = {
+  readonly watcherID: Endpoint1_27Request["params"]["watcherID"]
+  readonly externalID: Endpoint1_27Request["payload"]["externalID"]
+  readonly reason?: Endpoint1_27Request["payload"]["reason"]
+}
+const Endpoint1_27 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_27Input) =>
+  raw["issueWatcher.addIgnore"]({
+    params: { watcherID: input["watcherID"] },
+    payload: { externalID: input["externalID"], reason: input["reason"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint1_28Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.removeIgnore"]>[0]
+type Endpoint1_28Input = {
+  readonly watcherID: Endpoint1_28Request["params"]["watcherID"]
+  readonly externalID: Endpoint1_28Request["params"]["externalID"]
+}
+const Endpoint1_28 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_28Input) =>
+  raw["issueWatcher.removeIgnore"]({ params: { watcherID: input["watcherID"], externalID: input["externalID"] } }).pipe(
+    Effect.mapError(mapClientError),
+  )
+
+type Endpoint1_29Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.provenanceDetail"]>[0]
+type Endpoint1_29Input = { readonly sessionID: Endpoint1_29Request["params"]["sessionID"] }
+const Endpoint1_29 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_29Input) =>
+  raw["issueWatcher.provenanceDetail"]({ params: { sessionID: input["sessionID"] } }).pipe(
+    Effect.mapError(mapClientError),
+  )
+
+type Endpoint1_30Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.syncProvenance"]>[0]
+type Endpoint1_30Input = { readonly sessionID: Endpoint1_30Request["params"]["sessionID"] }
+const Endpoint1_30 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_30Input) =>
+  raw["issueWatcher.syncProvenance"]({ params: { sessionID: input["sessionID"] } }).pipe(
+    Effect.mapError(mapClientError),
+  )
+
+type Endpoint1_31Request = Parameters<RawClient["server.issueWatcher"]["issueWatcher.enable"]>[0]
+type Endpoint1_31Input = {
+  readonly watcherID: Endpoint1_31Request["params"]["watcherID"]
+  readonly enabled: Endpoint1_31Request["payload"]["enabled"]
+}
+const Endpoint1_31 = (raw: RawClient["server.issueWatcher"]) => (input: Endpoint1_31Input) =>
   raw["issueWatcher.enable"]({
     params: { watcherID: input["watcherID"] },
     payload: { enabled: input["enabled"] },
@@ -251,7 +370,19 @@ const adaptGroup1 = (raw: RawClient["server.issueWatcher"]) => ({
   ignores: Endpoint1_16(raw),
   inbox: Endpoint1_17(raw),
   inboxSummary: Endpoint1_18(raw),
-  enable: Endpoint1_19(raw),
+  bulk: Endpoint1_19(raw),
+  approve: Endpoint1_20(raw),
+  routeMatch: Endpoint1_21(raw),
+  skip: Endpoint1_22(raw),
+  dismiss: Endpoint1_23(raw),
+  rematerialize: Endpoint1_24(raw),
+  duplicateDetail: Endpoint1_25(raw),
+  resolveDuplicate: Endpoint1_26(raw),
+  addIgnore: Endpoint1_27(raw),
+  removeIgnore: Endpoint1_28(raw),
+  provenanceDetail: Endpoint1_29(raw),
+  syncProvenance: Endpoint1_30(raw),
+  enable: Endpoint1_31(raw),
 })
 
 type Endpoint2_0Request = Parameters<RawClient["server.location"]["location.get"]>[0]

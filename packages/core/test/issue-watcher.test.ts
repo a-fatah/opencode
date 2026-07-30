@@ -9,7 +9,7 @@ import { GlobalConfig } from "@opencode-ai/core/global-config"
 import { IssueWatcher } from "@opencode-ai/core/issue-watcher"
 import { IssueWatcherOwner } from "@opencode-ai/core/issue-watcher/owner"
 import { IssueProvider } from "@opencode-ai/core/issue-watcher/provider"
-import { Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, Scope } from "effect"
 import { Issue } from "@opencode-ai/schema/issue"
 import { Project } from "@opencode-ai/schema/project"
 import { testEffect } from "./lib/effect"
@@ -17,6 +17,22 @@ import { IssueMatchTable, IssueMaterializationTable, IssueWatcherIgnoreTable, Is
 import { eq } from "drizzle-orm"
 import { EventV2 } from "@opencode-ai/core/event"
 import { IssueMatch } from "@opencode-ai/schema/issue-match"
+import { SessionExecution } from "@opencode-ai/core/session/execution"
+import { ProjectTable } from "@opencode-ai/core/project/sql"
+import { AbsolutePath } from "@opencode-ai/core/schema"
+import { tmpdir } from "./fixture/tmpdir"
+import {
+  IssueMatchObservationTable,
+  IssueMatchSessionTable,
+  IssueSessionClaimTable,
+  SessionProvenanceTable,
+} from "@opencode-ai/core/issue-watcher/sql"
+import { SessionExecutionAttemptTable, SessionInputTable, SessionTable } from "@opencode-ai/core/session/sql"
+import { SessionID } from "@opencode-ai/schema/session-id"
+import { SessionV2 } from "@opencode-ai/core/session"
+import { EventTable } from "@opencode-ai/core/event/sql"
+import { SessionMessage } from "@opencode-ai/core/session/message"
+import { SessionExecutionAttempt } from "@opencode-ai/core/session/execution-attempt"
 
 const activeOwner = Layer.succeed(IssueWatcherOwner.Service, {
   status: () => ({ status: "active" }),
@@ -29,11 +45,16 @@ const globalConfig = Layer.succeed(GlobalConfig.Service, {
   updateIssueWatcher: () => Effect.die("unused"),
 })
 
-function layer(owner = activeOwner) {
-  return AppNodeBuilder.build(LayerNode.group([IssueWatcher.node, Credential.node, IssueProvider.node, Database.node, EventV2.node]), [
+function layer(
+  owner = activeOwner,
+  settings = globalConfig,
+  execution: Layer.Layer<SessionExecution.Service> = SessionExecution.noopLayer,
+) {
+  return AppNodeBuilder.build(LayerNode.group([IssueWatcher.node, Credential.node, IssueProvider.node, Database.node, EventV2.node, SessionV2.node]), [
     [Database.node, Database.layerFromPath(":memory:")],
-    [GlobalConfig.node, globalConfig],
+    [GlobalConfig.node, settings],
     [IssueWatcherOwner.node, owner],
+    [SessionExecution.node, execution],
   ])
 }
 
@@ -621,6 +642,189 @@ describe("IssueWatcher", () => {
       expect(second.nextCursor).toBeUndefined()
     }),
   )
+
+  it.live("atomically claims cross-watcher issues and recovers deterministic materialization stages", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (directory) => Effect.promise(() => directory[Symbol.asyncDispose]()),
+      )
+      const projectID = Project.ID.make("materialization-project")
+      const { db } = yield* Database.Service
+      yield* db.insert(ProjectTable).values({
+        id: projectID,
+        worktree: AbsolutePath.make(root.path),
+        sandboxes: [],
+      }).run().pipe(Effect.orDie)
+      const service = yield* IssueWatcher.Service
+      const watchers = yield* Effect.all([
+        service.create({ ...input, enabled: false, projectID, action: { ...input.action, mode: "awaiting_run" } }),
+        service.create({ ...input, enabled: false, projectID, name: "Competing watcher", action: { ...input.action, mode: "awaiting_run" } }),
+      ])
+      const runIDs = watchers.map((_, index) => IssueWatcherSchema.RunID.make(`iwr_materialization-${index}`))
+      yield* db.insert(IssueWatcherRunTable).values(watchers.map((watcher, index) => ({
+        id: runIDs[index]!,
+        watcher_id: watcher.id,
+        started_at: 1,
+        outcome: "ok" as const,
+      }))).run().pipe(Effect.orDie)
+      const matchIDs = watchers.map((_, index) => IssueMatch.ID.make(`imt_materialization-${index}`))
+      yield* db.insert(IssueMatchTable).values(watchers.map((watcher, index) => ({
+        id: matchIDs[index]!,
+        watcher_id: watcher.id,
+        integration_id: watcher.integrationID,
+        connection_id: watcher.connectionID,
+        external_id: issue.id,
+        external_key: issue.key,
+        external_url: issue.url,
+        fingerprint: IssueWatcher.fingerprint(issue),
+        external_updated_at: issue.updatedAt,
+        state: "pending" as const,
+        project_id: projectID,
+        payload: issue,
+      }))).run().pipe(Effect.orDie)
+      yield* db.insert(IssueMatchObservationTable).values(matchIDs.map((matchID, index) => ({
+        id: IssueMatch.ObservationID.make(`imo_materialization-${index}`),
+        match_id: matchID,
+        run_id: runIDs[index]!,
+        fingerprint: IssueWatcher.fingerprint(issue),
+        external_updated_at: issue.updatedAt,
+        payload: issue,
+      }))).run().pipe(Effect.orDie)
+
+      const approvals = yield* Effect.forEach(matchIDs, (matchID) => service.approve(matchID, { mode: "awaiting_run" }).pipe(Effect.exit), {
+        concurrency: "unbounded",
+      })
+      expect(approvals.filter(Exit.isSuccess)).toHaveLength(1)
+      const duplicate = approvals.flatMap((exit) => Exit.isFailure(exit)
+        ? Option.toArray(Cause.findErrorOption(exit.cause))
+        : [])
+      expect(duplicate).toHaveLength(1)
+      expect(duplicate[0]).toMatchObject({ _tag: "IssueWatcher.MatchConflictError", detail: "Issue match is duplicate" })
+      const materialized = yield* db.select().from(IssueMaterializationTable).get().pipe(Effect.orDie)
+      if (!materialized) return yield* Effect.die("Expected winning materialization")
+      expect(materialized).toMatchObject({ state: "prompt_admitted", mode: "awaiting_run", attempts: 0 })
+      expect(yield* service.matches.materialize({ matchID: materialized.match_id })).toMatchObject({
+        id: materialized.id,
+        sessionID: materialized.session_id,
+        messageID: materialized.message_id,
+      })
+      expect(yield* db.select().from(IssueSessionClaimTable).all().pipe(Effect.orDie)).toHaveLength(1)
+      expect(yield* db.select().from(SessionTable).all().pipe(Effect.orDie)).toHaveLength(1)
+      expect(yield* db.select().from(SessionInputTable).all().pipe(Effect.orDie)).toHaveLength(1)
+      expect(yield* db.select().from(IssueMatchSessionTable).all().pipe(Effect.orDie)).toHaveLength(1)
+      expect(yield* db.select().from(SessionProvenanceTable).all().pipe(Effect.orDie)).toHaveLength(1)
+      expect((yield* db.select().from(IssueMatchTable).where(eq(IssueMatchTable.state, "duplicate")).all().pipe(Effect.orDie))).toHaveLength(1)
+      expect((yield* db.select().from(EventTable).where(eq(EventTable.aggregate_id, materialized.id)).all().pipe(Effect.orDie))
+        .map((event) => event.type)).toEqual([`${IssueWatcher.Event.SessionMaterialized.type}.1`])
+      expect((yield* service.inbox({})).items.map((item) => item.match.id)).not.toContain(materialized.match_id)
+      expect((yield* service.summary()).pending).toBe(0)
+
+      const missingAttemptID = SessionExecutionAttempt.ID.make("sea_materialization-missing")
+      yield* db.update(SessionInputTable).set({ claimed_attempt_id: missingAttemptID })
+        .where(eq(SessionInputTable.id, SessionMessage.ID.make(materialized.message_id))).run().pipe(Effect.orDie)
+      yield* db.update(IssueMaterializationTable).set({
+        mode: "run",
+        state: "scheduled",
+        provider_started: false,
+        execution_attempt_id: missingAttemptID,
+      }).where(eq(IssueMaterializationTable.id, materialized.id)).run().pipe(Effect.orDie)
+      yield* service.matches.reconcile()
+      const recovered = yield* db.select().from(IssueMaterializationTable)
+        .where(eq(IssueMaterializationTable.id, materialized.id)).get().pipe(Effect.orDie)
+      expect(recovered).toMatchObject({
+          state: "scheduled",
+          provider_started: true,
+        })
+      expect(recovered?.execution_attempt_id).not.toBe(missingAttemptID)
+
+      const oldAttemptID = SessionExecutionAttempt.ID.make(recovered!.execution_attempt_id!)
+      yield* db.update(SessionExecutionAttemptTable).set({ status: "handoff_unknown" })
+        .where(eq(SessionExecutionAttemptTable.id, oldAttemptID)).run().pipe(Effect.orDie)
+      const successorAttemptID = SessionExecutionAttempt.ID.make("sea_materialization-successor")
+      yield* (yield* SessionV2.Service).confirmHandoff({
+        sessionID: SessionID.make(materialized.session_id),
+        attemptID: oldAttemptID,
+        newAttemptID: successorAttemptID,
+      })
+      expect(yield* db.select().from(IssueMaterializationTable)
+        .where(eq(IssueMaterializationTable.id, materialized.id)).get().pipe(Effect.orDie)).toMatchObject({
+          state: "scheduled",
+          execution_attempt_id: successorAttemptID,
+          error: null,
+        })
+      expect(yield* SessionExecutionAttempt.find(db, oldAttemptID)).toMatchObject({
+        status: "superseded",
+        supersededByAttemptID: successorAttemptID,
+      })
+
+      const duplicateID = matchIDs.find((matchID) => matchID !== materialized.match_id)!
+      const duplicateWatcher = watchers[matchIDs.indexOf(duplicateID)]!
+      const continued = yield* service.resolveDuplicate(duplicateID, { action: "continue" })
+      expect(continued).toEqual({ status: "continued", sessionID: SessionID.make(materialized.session_id) })
+      const currentInput = (yield* db.select().from(SessionInputTable)
+        .where(eq(SessionInputTable.session_id, SessionID.make(materialized.session_id))).all().pipe(Effect.orDie))
+        .find((row) => row.id !== materialized.message_id)
+      expect(currentInput?.prompt).toEqual({ text: "Fix {{issue}}" })
+
+      const secondaryRoot = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (directory) => Effect.promise(() => directory[Symbol.asyncDispose]()),
+      )
+      const secondaryProjectID = Project.ID.make("materialization-secondary-project")
+      yield* db.insert(ProjectTable).values({
+        id: secondaryProjectID,
+        worktree: AbsolutePath.make(secondaryRoot.path),
+        sandboxes: [],
+      }).run().pipe(Effect.orDie)
+      const second = yield* service.resolveDuplicate(duplicateID, {
+        action: "create_second",
+        mode: "awaiting_run",
+        projectID: secondaryProjectID,
+      })
+      expect(second.status).toBe("created")
+      if (second.status !== "created") return yield* Effect.die("Expected secondary materialization")
+      expect(yield* db.select().from(IssueSessionClaimTable).all().pipe(Effect.orDie)).toHaveLength(1)
+      expect(yield* db.select().from(IssueMatchSessionTable)
+        .where(eq(IssueMatchSessionTable.session_id, second.sessionID)).get().pipe(Effect.orDie)).toMatchObject({
+          is_primary: false,
+          reason: "duplicate_override",
+        })
+      const secondary = yield* db.select().from(IssueMaterializationTable)
+        .where(eq(IssueMaterializationTable.session_id, second.sessionID)).get().pipe(Effect.orDie)
+      if (!secondary) return yield* Effect.die("Expected secondary materialization row")
+      yield* (yield* SessionV2.Service).cancelInput({
+        sessionID: second.sessionID,
+        messageID: SessionMessage.ID.make(secondary.message_id),
+      })
+      expect(yield* db.select().from(IssueMaterializationTable)
+        .where(eq(IssueMaterializationTable.id, secondary.id)).get().pipe(Effect.orDie)).toMatchObject({ state: "cancelled" })
+      yield* (yield* SessionV2.Service).remove(second.sessionID)
+      expect(yield* db.select().from(IssueMatchSessionTable)
+        .where(eq(IssueMatchSessionTable.session_id, second.sessionID)).get().pipe(Effect.orDie)).toMatchObject({
+          is_primary: false,
+          deleted_at: expect.any(Number),
+        })
+      expect(yield* service.matches.provenance(SessionID.make(materialized.session_id))).toMatchObject({
+        externalKey: issue.key,
+        matchID: materialized.match_id,
+      })
+
+      yield* service.routeMatch(duplicateID, { projectID: secondaryProjectID, persistMapping: true })
+      expect((yield* service.get(duplicateWatcher.id)).routing.mappings).toContainEqual({
+        key: { type: "component", value: issue.component! },
+        projectID: secondaryProjectID,
+      })
+      yield* service.dismiss(duplicateID)
+      const bulk = yield* service.bulk({
+        matchIDs: [IssueMatch.ID.make("imt_missing"), duplicateID],
+        action: "approve",
+        mode: "awaiting_run",
+      })
+      expect(bulk.items[0]).toMatchObject({ status: "failed", error: { code: "not_found" } })
+      expect(bulk.items[1]).toMatchObject({ status: "failed", error: { code: "invalid_state" } })
+    }),
+  )
 })
 
 describe("IssueWatcher ownership conflicts", () => {
@@ -650,6 +854,102 @@ describe("IssueWatcher ownership conflicts", () => {
       expect(yield* service.run(watcher.id).pipe(Effect.flip)).toBeInstanceOf(IssueWatcher.OwnerConflictError)
       expect(yield* service.runAll().pipe(Effect.flip)).toBeInstanceOf(IssueWatcher.OwnerConflictError)
       expect((yield* service.history(watcher.id, {})).items).toEqual([])
+    }),
+  )
+})
+
+describe("IssueWatcher run capacity", () => {
+  const it = testEffect(layer(
+    activeOwner,
+    Layer.succeed(GlobalConfig.Service, {
+      getIssueWatcher: () => Effect.succeed({ pollInterval: 3600, concurrentRuns: 1, retryFailedRuns: "never" as const }),
+      updateIssueWatcher: () => Effect.die("unused"),
+    }),
+    Layer.succeed(SessionExecution.Service, {
+      active: Effect.succeed(new Set([SessionID.make("ses_active")])),
+      ownerEpoch: "capacity-test",
+      resume: () => Effect.void,
+      wake: () => Effect.void,
+      schedule: () => Effect.void,
+      interrupt: () => Effect.void,
+    }),
+  ))
+
+  it.effect("returns queued without creating materialization artifacts when capacity is full", () =>
+    Effect.gen(function* () {
+      const { db } = yield* Database.Service
+      const service = yield* IssueWatcher.Service
+      const watcher = yield* service.create({ ...input, enabled: false })
+      const matchID = IssueMatch.ID.make("imt_capacity")
+      yield* db.insert(IssueMatchTable).values({
+        id: matchID,
+        watcher_id: watcher.id,
+        integration_id: watcher.integrationID,
+        connection_id: watcher.connectionID,
+        external_id: issue.id,
+        external_key: issue.key,
+        external_url: issue.url,
+        fingerprint: IssueWatcher.fingerprint(issue),
+        external_updated_at: issue.updatedAt,
+        state: "pending",
+        project_id: Project.ID.make("project-capacity"),
+        payload: issue,
+      }).run().pipe(Effect.orDie)
+
+      expect(yield* service.matches.materialize({ matchID, mode: "run" })).toBeUndefined()
+      expect(yield* db.select().from(IssueMaterializationTable).all().pipe(Effect.orDie)).toEqual([])
+      expect(yield* db.select().from(SessionTable).all().pipe(Effect.orDie)).toEqual([])
+    }),
+  )
+
+  it.effect("leaves startup reconciliation pending when run capacity is full", () =>
+    Effect.gen(function* () {
+      const { db } = yield* Database.Service
+      const service = yield* IssueWatcher.Service
+      const watcher = yield* service.create({ ...input, enabled: false })
+      const matchID = IssueMatch.ID.make("imt_reconcile-capacity")
+      const runID = IssueWatcherSchema.RunID.make("iwr_reconcile-capacity")
+      const observationID = IssueMatch.ObservationID.make("imo_reconcile-capacity")
+      yield* db.insert(IssueWatcherRunTable).values({ id: runID, watcher_id: watcher.id, started_at: 1, outcome: "ok" }).run().pipe(Effect.orDie)
+      yield* db.insert(IssueMatchTable).values({
+        id: matchID,
+        watcher_id: watcher.id,
+        integration_id: watcher.integrationID,
+        connection_id: watcher.connectionID,
+        external_id: "reconcile-capacity",
+        external_key: issue.key,
+        external_url: issue.url,
+        fingerprint: IssueWatcher.fingerprint(issue),
+        external_updated_at: issue.updatedAt,
+        state: "pending",
+        project_id: Project.ID.make("project-capacity"),
+        payload: issue,
+      }).run().pipe(Effect.orDie)
+      yield* db.insert(IssueMatchObservationTable).values({
+        id: observationID,
+        match_id: matchID,
+        run_id: runID,
+        fingerprint: IssueWatcher.fingerprint(issue),
+        external_updated_at: issue.updatedAt,
+        payload: issue,
+      }).run().pipe(Effect.orDie)
+      yield* db.insert(IssueMaterializationTable).values({
+        id: IssueMatch.MaterializationID.make("imz_reconcile-capacity"),
+        match_id: matchID,
+        mode: "run",
+        project_id: Project.ID.make("project-capacity"),
+        workspace: { type: "current" },
+        baseline_observation_id: observationID,
+        state: "pending",
+        session_id: SessionID.make("ses_reconcile-capacity"),
+        message_id: SessionMessage.ID.make("msg_reconcile-capacity"),
+      }).run().pipe(Effect.orDie)
+
+      yield* service.matches.reconcile()
+
+      expect(yield* db.select().from(IssueMaterializationTable).where(eq(IssueMaterializationTable.match_id, matchID)).get().pipe(Effect.orDie))
+        .toMatchObject({ state: "pending", provider_started: false, execution_attempt_id: null })
+      expect(yield* db.select().from(SessionTable).where(eq(SessionTable.id, SessionID.make("ses_reconcile-capacity"))).get().pipe(Effect.orDie)).toBeUndefined()
     }),
   )
 })

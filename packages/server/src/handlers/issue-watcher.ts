@@ -11,6 +11,12 @@ import {
   IssueWatcherOwnerConflict,
   IssueWatcherRunConflict,
 } from "@opencode-ai/protocol/errors"
+import {
+  IssueMatchConflictError,
+  IssueMatchNotFoundError,
+  IssueWatcherProjectNotFoundError,
+  IssueWatcherSessionNotFoundError,
+} from "@opencode-ai/protocol/groups/issue-watcher"
 import { Effect } from "effect"
 import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi"
 import { Api } from "../api"
@@ -31,6 +37,18 @@ const runConflict = (error: IssueWatcher.RunConflictError) =>
     watcherID: error.id,
     message: error.detail,
   })
+
+const matchNotFound = (matchID: string) =>
+  new IssueMatchNotFoundError({ matchID, message: `Issue match not found: ${matchID}` })
+
+const matchConflict = (matchID: string, detail: string) =>
+  new IssueMatchConflictError({ matchID, message: detail })
+
+const projectNotFound = (projectID: string) =>
+  new IssueWatcherProjectNotFoundError({ projectID, message: `Project not found: ${projectID}` })
+
+const provenanceNotFound = (sessionID: string) =>
+  new IssueWatcherSessionNotFoundError({ sessionID, message: `Issue provenance not found: ${sessionID}` })
 
 const sourceError = (error: IssueWatcher.SourceNotFoundError | IssueWatcher.ConnectionNotFoundError | IssueWatcher.VerificationModeError | import("@opencode-ai/core/issue-watcher/provider").IssueProvider.Error) => {
   if (error._tag === "IssueWatcher.SourceNotFoundError") {
@@ -148,5 +166,99 @@ export const IssueWatcherHandler = HttpApiBuilder.group(Api, "server.issueWatche
         ),
       )
       .handle("issueWatcher.inboxSummary", () => service.summary())
+      .handle("issueWatcher.bulk", (ctx) => service.bulk(ctx.payload))
+      .handle("issueWatcher.approve", (ctx) =>
+        service.approve(ctx.params.matchID, ctx.payload).pipe(
+          Effect.catchTags({
+            "IssueWatcher.MatchNotFoundError": () => matchNotFound(ctx.params.matchID),
+            "IssueWatcher.MatchConflictError": (error) => matchConflict(ctx.params.matchID, error.detail),
+            "IssueWatcher.ProjectNotFoundError": (error) => projectNotFound(error.id),
+          }),
+        ),
+      )
+      .handle("issueWatcher.routeMatch", (ctx) =>
+        service.routeMatch(ctx.params.matchID, ctx.payload).pipe(
+          Effect.catchTags({
+            "IssueWatcher.MatchNotFoundError": () => matchNotFound(ctx.params.matchID),
+            "IssueWatcher.MatchConflictError": (error) => matchConflict(ctx.params.matchID, error.detail),
+            "IssueWatcher.ProjectNotFoundError": (error) => projectNotFound(error.id),
+          }),
+          Effect.as(HttpApiSchema.NoContent.make()),
+        ),
+      )
+      .handle("issueWatcher.skip", (ctx) =>
+        service.skip(ctx.params.matchID).pipe(
+          Effect.catchTags({
+            "IssueWatcher.MatchNotFoundError": () => matchNotFound(ctx.params.matchID),
+            "IssueWatcher.MatchConflictError": (error) => matchConflict(ctx.params.matchID, error.detail),
+          }),
+          Effect.as(HttpApiSchema.NoContent.make()),
+        ),
+      )
+      .handle("issueWatcher.dismiss", (ctx) =>
+        service.dismiss(ctx.params.matchID).pipe(
+          Effect.catchTags({
+            "IssueWatcher.MatchNotFoundError": () => matchNotFound(ctx.params.matchID),
+            "IssueWatcher.MatchConflictError": (error) => matchConflict(ctx.params.matchID, error.detail),
+          }),
+          Effect.as(HttpApiSchema.NoContent.make()),
+        ),
+      )
+      .handle("issueWatcher.rematerialize", (ctx) =>
+        service.rematerialize(ctx.params.matchID, ctx.payload).pipe(
+          Effect.catchTags({
+            "IssueWatcher.MatchNotFoundError": () => matchNotFound(ctx.params.matchID),
+            "IssueWatcher.MatchConflictError": (error) => matchConflict(ctx.params.matchID, error.detail),
+            "IssueWatcher.ProjectNotFoundError": (error) => projectNotFound(error.id),
+          }),
+        ),
+      )
+      .handle("issueWatcher.duplicateDetail", (ctx) =>
+        service.duplicateDetail(ctx.params.matchID).pipe(
+          Effect.catchTags({
+            "IssueWatcher.MatchNotFoundError": () => matchNotFound(ctx.params.matchID),
+            "IssueWatcher.MatchConflictError": (error) => matchConflict(ctx.params.matchID, error.detail),
+          }),
+        ),
+      )
+      .handle("issueWatcher.resolveDuplicate", (ctx) =>
+        service.resolveDuplicate(ctx.params.matchID, ctx.payload).pipe(
+          Effect.catchTags({
+            "IssueWatcher.MatchNotFoundError": () => matchNotFound(ctx.params.matchID),
+            "IssueWatcher.MatchConflictError": (error) => matchConflict(ctx.params.matchID, error.detail),
+            "IssueWatcher.ProjectNotFoundError": (error) => projectNotFound(error.id),
+          }),
+        ),
+      )
+      .handle("issueWatcher.addIgnore", (ctx) =>
+        service.addIgnore(ctx.params.watcherID, ctx.payload).pipe(
+          Effect.catchTag("IssueWatcher.NotFoundError", () => notFound(ctx.params.watcherID)),
+        ),
+      )
+      .handle("issueWatcher.removeIgnore", (ctx) =>
+        service.removeIgnore(ctx.params.watcherID, ctx.params.externalID).pipe(
+          Effect.catchTag("IssueWatcher.NotFoundError", () => notFound(ctx.params.watcherID)),
+          Effect.as(HttpApiSchema.NoContent.make()),
+        ),
+      )
+      .handle("issueWatcher.provenanceDetail", (ctx) =>
+        service.provenanceDetail(ctx.params.sessionID).pipe(
+          Effect.catchTag("IssueWatcher.ProvenanceNotFoundError", () => provenanceNotFound(ctx.params.sessionID)),
+        ),
+      )
+      .handle("issueWatcher.syncProvenance", (ctx) =>
+        service.syncProvenance(ctx.params.sessionID).pipe(
+          Effect.catchTags({
+            "IssueWatcher.ProvenanceNotFoundError": () => provenanceNotFound(ctx.params.sessionID),
+            "IssueWatcher.SourceNotFoundError": sourceError,
+            "IssueWatcher.ConnectionNotFoundError": sourceError,
+            "IssueProvider.AuthenticationError": sourceError,
+            "IssueProvider.InvalidInputError": sourceError,
+            "IssueProvider.NotImplementedError": sourceError,
+            "IssueProvider.PaginationError": sourceError,
+            "IssueProvider.RequestError": sourceError,
+          }),
+        ),
+      )
   }),
 )

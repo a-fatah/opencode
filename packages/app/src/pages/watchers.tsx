@@ -287,7 +287,15 @@ export function WatcherEditorPage() {
         { integrationID, connectionID, issueProjects },
         { signal: controller.signal },
       )
-        .then((metadata) => setStore("metadata", metadata))
+        .then((metadata) => {
+          const assigneeID = store.draft.criteria.assignee && store.draft.criteria.assignee !== "me"
+            ? store.draft.criteria.assignee.id
+            : undefined
+          const selected = assigneeID && !metadata.users.some((user) => user.id === assigneeID)
+            ? store.metadata?.users.find((user) => user.id === assigneeID)
+            : undefined
+          setStore("metadata", selected ? { ...metadata, users: [...metadata.users, selected] } : metadata)
+        })
         .catch((error: Error) => {
           if (error.name !== "AbortError") setStore("metadataError", error.message)
         })

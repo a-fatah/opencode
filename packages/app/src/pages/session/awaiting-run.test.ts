@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test"
 import type { SessionInput } from "@opencode-ai/schema/session-input"
 import {
   awaitingRunLocked,
+  awaitingRunPromptState,
+  clearedAwaitingRunState,
   awaitingRunVisible,
   confirmationPair,
   createAwaitingRunApi,
@@ -30,6 +32,15 @@ describe("awaiting run", () => {
     expect(pendingHydration(state, "", input)).toBe("server prompt")
     expect(pendingHydration({ ...state, hydratedID: input.id, sourceText: input.prompt.text }, "user edit", input)).toBeUndefined()
     expect(pendingHydration(state, "already typing", input)).toBeUndefined()
+    expect(pendingHydration({ ...state, sessionID: "ses_other", messageID: "msg_other" }, "stale", input)).toBe("server prompt")
+    expect(awaitingRunPromptState(input, "server prompt")).toEqual({
+      sessionID: "ses_1",
+      messageID: "msg_1",
+      hydratedID: "msg_1",
+      sourceText: "server prompt",
+      locked: false,
+    })
+    expect(clearedAwaitingRunState()).toEqual({ locked: true })
   })
 
   test("reuses run and confirmation IDs across retries", () => {

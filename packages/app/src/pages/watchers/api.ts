@@ -1,7 +1,6 @@
 import type { ServerSDK } from "@/context/server-sdk"
 import type {
   IssueWatchersHistoryOutput,
-  IssueWatchersInboxInput,
   IssueWatchersInboxOutput,
   IssueWatchersInboxSummaryOutput,
   IssueWatchersListOutput,
@@ -20,13 +19,8 @@ export type WatcherSummary = IssueWatchersListOutput[number] & {
 export type WatcherRunAll = IssueWatchersRunAllOutput
 
 type GeneratedApi = ServerSDK["nextApi"]["issueWatchers"]
-type InboxInput = IssueWatchersInboxInput & { readonly attention?: boolean }
-type AppApi = Omit<GeneratedApi, "list" | "inbox"> & {
+type AppApi = Omit<GeneratedApi, "list"> & {
   list: (...args: Parameters<GeneratedApi["list"]>) => Promise<ReadonlyArray<WatcherSummary>>
-  inbox: (
-    input?: InboxInput,
-    requestOptions?: Parameters<GeneratedApi["inbox"]>[1],
-  ) => ReturnType<GeneratedApi["inbox"]>
 }
 
 export function issueWatcherApi(sdk: ServerSDK) {

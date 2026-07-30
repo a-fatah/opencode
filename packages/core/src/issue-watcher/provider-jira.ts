@@ -163,21 +163,20 @@ export function makeJira(http: HttpClient.HttpClient): IssueProvider.Adapter {
     }),
     metadata: Effect.fn("Jira.metadata")(function* (credential, input) {
       const projectKeys = [...new Set(input.issueProjects)]
-      const [jiraProjects, labels, fields, users, projectMetadata] = yield* Effect.all([
-        projects(credential),
+      const jiraProjects = yield* projects(credential)
+      const userProjectKeys = projectKeys.length ? projectKeys : jiraProjects.map((project) => project.key)
+      const [labels, fields, users, projectMetadata] = yield* Effect.all([
         execute(credential, "/rest/api/3/label?maxResults=1000", JiraLabels),
         execute(credential, "/rest/api/3/field", Schema.Array(JiraField)),
-        projectKeys.length
-          ? Effect.forEach(
-              projectKeys,
-              (key) => execute(
-                credential,
-                `/rest/api/3/user/assignable/multiProjectSearch?${new URLSearchParams({ projectKeys: key, maxResults: "1000" })}`,
-                Schema.Array(JiraMetadataUser),
-              ),
-              { concurrency: "unbounded" },
-            ).pipe(Effect.map((results) => results.flat()))
-          : execute(credential, "/rest/api/3/user/search?maxResults=1000", Schema.Array(JiraMetadataUser)),
+        Effect.forEach(
+          userProjectKeys,
+          (key) => execute(
+            credential,
+            `/rest/api/3/user/assignable/multiProjectSearch?${new URLSearchParams({ projectKeys: key, maxResults: "1000" })}`,
+            Schema.Array(JiraMetadataUser),
+          ).pipe(Effect.catchTag("IssueProvider.RequestError", () => Effect.succeed([]))),
+          { concurrency: 4 },
+        ).pipe(Effect.map((results) => results.flat())),
         Effect.forEach(
           projectKeys,
           (key) => {

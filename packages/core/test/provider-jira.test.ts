@@ -116,20 +116,23 @@ describe("Jira issue provider", () => {
 
   test("loads active Jira users when all projects are selected", async () => {
     const http = fakeHttp((request) => {
-      const pathname = url(request).pathname
-      if (pathname === "/rest/api/3/project/search") return Response.json({ total: 0, values: [] })
+      const requestUrl = url(request)
+      const pathname = requestUrl.pathname
+      if (pathname === "/rest/api/3/project/search") return Response.json({ total: 2, values: [{ id: "100", key: "ENG", name: "Engineering" }, { id: "200", key: "OPS", name: "Operations" }] })
       if (pathname === "/rest/api/3/label") return Response.json({ values: [] })
       if (pathname === "/rest/api/3/field") return Response.json([])
-      if (pathname === "/rest/api/3/user/search") return Response.json([
-        { accountId: "active", displayName: "Ada", active: true },
-        { accountId: "inactive", displayName: "Grace", active: false },
-      ])
+      if (pathname === "/rest/api/3/user/assignable/multiProjectSearch") return requestUrl.searchParams.get("projectKeys") === "ENG"
+        ? Response.json([{ accountId: "active", displayName: "Ada", active: true }, { accountId: "inactive", displayName: "Grace", active: false }])
+        : new Response(null, { status: 400 })
       return new Response(null, { status: 404 })
     })
     const result = await Effect.runPromise(makeJira(http.client).metadata(credential(), { issueProjects: [] }))
 
     expect(result.users).toEqual([{ id: "active", name: "Ada" }])
-    expect(http.requests.some((request) => url(request).pathname === "/rest/api/3/user/search")).toBe(true)
+    expect(http.requests
+      .filter((request) => url(request).pathname === "/rest/api/3/user/assignable/multiProjectSearch")
+      .map((request) => url(request).searchParams.get("projectKeys"))
+      .sort()).toEqual(["ENG", "OPS"])
   })
 
   test("loads every page of visible Jira projects", async () => {
@@ -144,7 +147,7 @@ describe("Jira issue provider", () => {
       }
       if (requestUrl.pathname === "/rest/api/3/label") return Response.json({ values: [] })
       if (requestUrl.pathname === "/rest/api/3/field") return Response.json([])
-      if (requestUrl.pathname === "/rest/api/3/user/search") return Response.json([])
+      if (requestUrl.pathname === "/rest/api/3/user/assignable/multiProjectSearch") return Response.json([])
       return new Response(null, { status: 404 })
     })
     const result = await Effect.runPromise(makeJira(http.client).metadata(credential(), { issueProjects: [] }))

@@ -1,5 +1,6 @@
 import type { Session } from "@opencode-ai/sdk/v2/client"
 import { type Accessor, createMemo, For, Show, Suspense } from "solid-js"
+import { createStore } from "solid-js/store"
 import { Spinner } from "@opencode-ai/ui/spinner"
 import { ScrollView } from "@opencode-ai/ui/scroll-view"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
@@ -18,6 +19,7 @@ import {
   type HomeSessionRecord,
   type OpenSessionOptions,
 } from "./home-sessions-controller"
+import { homeRelativeTime, homeSessionMatchesSource } from "./home-session-metadata"
 
 const SHOW_HOME_SESSION_ARCHIVE = false
 const HOME_SECTION_LABEL = "text-v2-text-text-muted [font-weight:440]"
@@ -72,6 +74,15 @@ export type HomeSessionsViewProps = {
 }
 
 export function HomeSessionsView(props: HomeSessionsViewProps) {
+  const [store, setStore] = createStore({ source: "all" as "all" | "issues" | "manual" })
+  const groups = createMemo(() =>
+    props.groups()
+      .map((group) => ({
+        ...group,
+        sessions: group.sessions.filter((record) => homeSessionMatchesSource(store.source, record.session.provenance?.type === "issue")),
+      }))
+      .filter((group) => group.sessions.length),
+  )
   return (
     <section
       ref={props.onSetHoverTarget}
@@ -80,9 +91,14 @@ export function HomeSessionsView(props: HomeSessionsViewProps) {
     >
       <div class="sticky top-0 z-30 shrink-0 bg-v2-background-bg-base pb-3 pt-6 lg:pt-12" onWheel={props.onWheel}>
         <HomeSessionSearch {...props} />
+        <nav class="mt-3 flex items-center gap-1" aria-label="Session source filters">
+          <HomeSourceFilter active={store.source === "all"} onClick={() => setStore("source", "all")}>All</HomeSourceFilter>
+          <HomeSourceFilter active={store.source === "issues"} onClick={() => setStore("source", "issues")}>From issues</HomeSourceFilter>
+          <HomeSourceFilter active={store.source === "manual"} onClick={() => setStore("source", "manual")}>Manual</HomeSourceFilter>
+        </nav>
         <Suspense>
-          <Show when={props.groups().length > 0 && props.canCreateSession()}>
-            <div class="pointer-events-none absolute right-0 top-[84px] z-20 flex lg:top-[108px]">
+          <Show when={groups().length > 0 && props.canCreateSession()}>
+            <div class="pointer-events-none absolute right-0 top-[119px] z-20 flex lg:top-[143px]">
               <ButtonV2
                 data-action="home-new-session"
                 variant="ghost-muted"
@@ -97,7 +113,7 @@ export function HomeSessionsView(props: HomeSessionsViewProps) {
           </Show>
         </Suspense>
       </div>
-      <div class="pointer-events-none sticky top-[84px] z-40 h-0 -mr-3 lg:top-[108px]">
+      <div class="pointer-events-none sticky top-[119px] z-40 h-0 -mr-3 lg:top-[143px]">
         <div
           ref={props.onSetThumbTrack}
           data-component="home-session-scroll-track"
@@ -113,7 +129,7 @@ export function HomeSessionsView(props: HomeSessionsViewProps) {
           }
         >
           <Show
-            when={props.groups().length > 0}
+            when={groups().length > 0}
             fallback={
               <HomeSessionsEmpty
                 onNewSession={props.canCreateSession() ? props.onCreateSession : undefined}
@@ -122,7 +138,7 @@ export function HomeSessionsView(props: HomeSessionsViewProps) {
             }
           >
             <div ref={props.onSetContent} class="flex flex-col pt-3 pr-3 pb-16">
-              <For each={props.groups()}>
+              <For each={groups()}>
                 {(group, index) => (
                   <>
                     <HomeSessionGroupHeader
@@ -132,7 +148,7 @@ export function HomeSessionsView(props: HomeSessionsViewProps) {
                       elevated={index() === 0}
                     />
                     <div
-                      class={`flex min-w-0 flex-col gap-px pt-4 ${index() === props.groups().length - 1 ? "" : "mb-6"}`}
+                      class={`flex min-w-0 flex-col gap-px pt-4 ${index() === groups().length - 1 ? "" : "mb-6"}`}
                     >
                       <For each={group.sessions}>{(record) => <HomeSessionRow {...props} record={record} />}</For>
                     </div>
@@ -384,6 +400,7 @@ function HomeSessionSearchResultRow(
       />
       <div class="flex min-w-0 flex-1 items-center gap-1.5">
         <HomeSessionTitle title={title()} showProjectName={!!showProjectName()} search />
+        <HomeSessionMetadata record={props.record} />
         <Show when={showProjectName()}>
           <HomeSessionProjectName name={props.record.projectName} search />
         </Show>
@@ -402,8 +419,8 @@ function HomeSessionGroupHeader(props: {
     <div
       ref={props.onSetRef}
       class={`
-        pointer-events-none sticky top-[84px] flex h-7 min-w-0 items-center justify-between
-        bg-v2-background-bg-base pl-3 lg:top-[108px]
+        pointer-events-none sticky top-[119px] flex h-7 min-w-0 items-center justify-between
+        bg-v2-background-bg-base pl-3 lg:top-[143px]
       `}
       classList={{ "home-session-group-header z-[5]": !!props.elevated, "z-10": !props.elevated }}
     >
@@ -449,6 +466,7 @@ function HomeSessionRow(props: HomeSessionsViewProps & { record: HomeSessionReco
           revealProjectOnHover={!!showProjectName()}
         />
         <HomeSessionTitle title={title()} showProjectName={!!showProjectName()} />
+        <HomeSessionMetadata record={props.record} />
         <Show when={showProjectName()}>
           <HomeSessionProjectName name={props.record.projectName} />
         </Show>
@@ -479,6 +497,48 @@ function HomeSessionRow(props: HomeSessionsViewProps & { record: HomeSessionReco
     </div>
   )
 }
+
+function HomeSessionMetadata(props: { record: HomeSessionRecord }) {
+  const status = () => props.record.session.status
+  const statusLabel = () => {
+    if (status() === "awaiting_run") return "Awaiting run"
+    if (status() === "handoff_unknown") return "Handoff unknown"
+    if (status() === "running") return "Running"
+    return "Idle"
+  }
+  const provenance = () => props.record.session.provenance
+
+  return (
+    <>
+      <Show when={statusLabel()}>
+        {(label) => (
+          <span class="shrink-0 rounded-full bg-v2-background-bg-layer-02 px-2 py-0.5 text-11-medium text-v2-text-text-muted">
+            {label()}
+          </span>
+        )}
+      </Show>
+      <Show when={provenance()}>
+        {(source) => (
+          <>
+            <span class="flex size-5 shrink-0 items-center justify-center rounded bg-v2-background-bg-layer-02 text-10-medium uppercase text-v2-text-text-muted" title={source().integrationID}>
+              {source().integrationID.slice(0, 1)}
+            </span>
+            <span class="shrink-0 text-11-medium text-v2-text-text-base">{source().externalKey}</span>
+            <span class="min-w-0 max-w-48 shrink overflow-hidden text-ellipsis whitespace-nowrap text-11-regular text-v2-text-text-muted" title={`Watcher: ${source().watcherName}`}>
+              {source().watcherName}<Show when={source().branch}> · {source().branch}</Show>
+            </span>
+            <span class="shrink-0 text-11-regular text-v2-text-text-muted">{homeRelativeTime(props.record.session.time.updated ?? props.record.session.time.created)}</span>
+          </>
+        )}
+      </Show>
+    </>
+  )
+}
+
+function HomeSourceFilter(props: { active: boolean; onClick: () => void; children: string }) {
+  return <button type="button" class="rounded-full px-3 py-1 text-11-medium text-v2-text-text-muted" classList={{ "bg-v2-background-bg-layer-02 text-v2-text-text-strong": props.active }} aria-pressed={props.active} onClick={props.onClick}>{props.children}</button>
+}
+
 
 function HomeSessionTitle(props: { title: string; showProjectName: boolean; search?: boolean }) {
   return (
